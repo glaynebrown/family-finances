@@ -220,7 +220,9 @@ function catCard(c) {
   const right = c.over
     ? `<button class="val-edit over-txt" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</button>`
     : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
-  return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="log" data-cat="${esc(c.id)}">
+  // Log mode: tap a card to log a purchase in it. Import mode: tap to see what's in it.
+  const tapAct = H().trackMode === 'import' ? 'cat-list' : 'log';
+  return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="${tapAct}" data-cat="${esc(c.id)}">
     <div class="row between"><span class="cat-name"><span class="emoji">${esc(c.emoji || '•')}</span>${esc(c.name)}</span><span>${right}</span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="small muted">${money(c.used)} of ${money(c.budget)}${trimmed}${c.over ? (calm() ? ' · flagged for review' : '') : ''}</div>
@@ -261,7 +263,7 @@ function viewHome() {
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span></div>
     <div class="bar thin"><i style="width:${pct}%"></i></div>
     <div class="small muted">${money(totalU)} of ${money(totalB)} spent${overs.length ? ` · ${overs.length} ${calm() ? 'to look at during review' : 'over budget'}` : ''}</div>
-    ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'} · <button class="linkish small" data-act="log">Add one by hand</button></div>` : ''}
+    ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
   ${uncatCard(c.spent)}`}`;
@@ -469,7 +471,8 @@ function viewYear() {
   const shown = rows.filter(r => !(r.past && !r.hasData));
   const cards = shown.map(yearCard).join('');
   const isOpen = r => (S.open[r.ym] !== undefined ? S.open[r.ym] : !r.past);
-  const allOpen = shown.length && shown.every(isOpen);
+  // If anything is open, the arrow closes everything; only when all are closed does it open them all.
+  const allOpen = shown.length && shown.some(isOpen);
   return `
   <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
   <section class="card">
@@ -1168,6 +1171,18 @@ const acts = {
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
   eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
   'import-file': () => pickImportFile(),
+  // Import mode: a category's purchases this month (tap one to change it).
+  'cat-list': el => {
+    const ym = homeYm();
+    const c = Calc.checklist(H(), S.months[ym], ym, S.purchases).cats.find(x => x.id === el.dataset.cat);
+    if (!c) return;
+    const list = Calc.spent(S.purchases, ym).list.filter(p => p.cat === c.id);
+    S.sheet = 'soft';
+    openSheet(`<div class="sheet-head"><h2>${esc(c.emoji || '')} ${esc(c.name)}</h2><button class="x" data-act="close">×</button></div>
+      <p class="small muted">${D.name(ym)} · ${money(c.used)} of ${money(c.budget)}${c.over ? ` · over by ${money(c.used - c.budget)}` : ` · ${money(c.left)} left`}</p>
+      ${list.length ? list.map(p => purchaseRow(p)).join('') : '<p class="muted">Nothing in this category yet this month.</p>'}
+      <p class="small muted">Tap a purchase to change its category, tags or note.</p>`);
+  },
   'imp-cancel': () => { S.imp = null; },
   'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
   'imp-untag': el => { const r = S.imp.rows[el.dataset.i]; r.tags = r.tags.filter(t => t !== el.dataset.v); render(true); },
@@ -1531,7 +1546,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'l-amount') { e.preventDefault(); $('#l-note').focus(); }
   if (e.key === 'Enter' && e.target.matches('.val-in, .item-in')) { e.preventDefault(); e.target.blur(); }
   if (e.key === 'Escape' && e.target.matches('.val-in, .item-in')) { e.target.value = ''; e.target.blur(); render(); }
-  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cat[role="button"]')) { e.preventDefault(); openLog({ cat: e.target.dataset.cat }); }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cat[role="button"]')) { e.preventDefault(); acts[e.target.dataset.act](e.target); }
   if (e.key === 'Escape' && sheetOpen()) closeSheet();
 });
 
