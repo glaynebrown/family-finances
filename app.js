@@ -30,6 +30,7 @@ const catById = id => (H().categories || []).find(c => c.id === id);
 const feat = k => ((H() && H().features) || {})[k];
 const bucketsOn = () => !!feat('buckets');
 const overviewOn = () => feat('overview') !== false;
+const payInChecking = () => !!feat('payInChecking');
 
 
 /* ---------- little UI pieces ---------- */
@@ -184,13 +185,14 @@ function render(force) {
 //    (if something changed, the 'change' handler has already saved it)
 //  - "add" rows (name + amount + Add button) add the item once every box is
 //    filled and you tap somewhere outside the row
+document.addEventListener('pointerdown', e => { S.lastDown = e.target; }, true);
 document.addEventListener('focusout', e => {
   const t = e.target;
   setTimeout(() => {
     const now = document.activeElement;
     if (t.matches && t.matches('.val-in, .item-in') && t.isConnected) S.pending = true;
     const row = t.closest && t.closest('.add-row');
-    if (row && row.isConnected && !row.contains(now)) {
+    if (row && row.isConnected && !row.contains(now) && !(S.lastDown && row.contains(S.lastDown))) {
       const inputs = [...row.querySelectorAll('input')];
       const btn = row.querySelector('button[data-act]');
       if (btn && inputs.length && inputs.every(i => i.value.trim() !== '')) { btn.click(); return; }
@@ -366,6 +368,7 @@ function billsSections() {
     ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
     ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
+    ${c.nextPay ? line('−', 'Set aside for next month (paychecks)', c.nextPay) : ''}
     ${line('−', 'Bills still to come', c.billsLeft)}
     ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
     ${line('−', 'Budget left to spend', c.budgetsLeft)}
@@ -397,7 +400,8 @@ function billsSections() {
 
   ${listCard('other', 'Other expenses this month', M.other || [], 'paid', 'Paid')}
   ${listCard('back', 'Additional income', M.back || [], 'received', 'Received')}
-  ${[['other', 'other expense'], ['back', 'additional income']].filter(([k]) => !(M[k] || []).length && S.adding !== k)
+  ${payInChecking() ? listCard('incoming', `Paychecks for ${D.name(D.addMonths(ym, 1))}`, M.incoming || [], 'received', 'Arrived') : ''}
+  ${[['other', 'other expense'], ['back', 'additional income'], ...(payInChecking() ? [['incoming', 'paycheck']] : [])].filter(([k]) => !(M[k] || []).length && S.adding !== k)
     .map(([k, l]) => `<button class="linkish small add-link" data-act="li-open" data-kind="${k}">+ Add ${l}</button>`).join('')}`;
 }
 
@@ -419,7 +423,7 @@ function listCard(kind, title, items, flag, flagLabel) {
       <button class="x small" data-act="li-del" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button>
     </div>`).join('')}
     ${doneNote(items.filter(o => o[flag]).length, kind === 'back' ? 'received' : 'paid')}
-    ${adding ? `<div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming in' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
+    ${adding ? `<div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming in' : kind === 'incoming' ? 'Paycheck' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
       <button class="linkish small" data-act="li-open" data-kind="">Cancel</button>`
       : `<button class="linkish small add-link" data-act="li-open" data-kind="${kind}">+ Add</button>`}
   </section>`;
@@ -434,11 +438,21 @@ function toggleFlag(o, flag) {
   return { ...o, [flag]: true, [key]: o[key] && o[key] <= snap ? o[key] : Date.now() };
 }
 
+// Keep the Year tab's income for this month in step with the paychecks listed
+// (amounts change with overtime). Goes to the household's first earner.
+async function syncPayPlan(list, ym = homeYm()) {
+  list = list || (S.months[ym] || {}).incoming || [];
+  const e = Calc.earners(H())[0];
+  if (!e) return;
+  await B.setH([[['plans', ym, e.id], round2(list.reduce((a, x) => a + (Number(x.amount) || 0), 0))]]);
+}
+
 async function monthList(kind, fn) {
   const ym = homeYm();
   const M = S.months[ym] || {};
   const arr = fn([...(M[kind] || [])]);
   await B.setMonthField(ym, [kind], arr);
+  if (kind === 'incoming') await syncPayPlan(arr, ym);
 }
 
 /* ---------- Year ---------- */
@@ -981,6 +995,15 @@ function startDraft() {
   }
   for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Calc.budgetFor(H(), null, c, N);
   d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? '']));
+  // Paid every two weeks into checking: start with two paychecks splitting the
+  // planned (or usual) amount; amounts are editable and a third can be added.
+  if (payInChecking()) {
+    const e = Calc.earners(H())[0];
+    const monthly = Number(plan[e.id]) || Number((H().usual || {})[e.id]) || 0;
+    const half = round2(monthly / 2);
+    d.incoming = MN && MN.setup && MN.incoming ? MN.incoming.map(x => ({ ...x }))
+      : [{ id: newId(), name: 'Paycheck 1', amount: half, received: false }, { id: newId(), name: 'Paycheck 2', amount: round2(monthly - half), received: false }];
+  }
   S.draft = d;
 }
 
@@ -990,7 +1013,7 @@ function estChecking() { const cur = homeYm(); return Calc.checklist(H(), S.mont
 function draftMonth(d) {
   return {
     setup: true, budgets: d.budgets, checking: { amount: num(d.checking) !== null ? num(d.checking) : estChecking(), at: Date.now() }, bills: {},
-    other: d.other, back: d.back, held: d.held, moved: null,
+    other: d.other, back: d.back, held: d.held, moved: null, ...(d.incoming ? { incoming: d.incoming } : {}),
   };
 }
 
@@ -1002,6 +1025,11 @@ function readDraftInputs() {
   for (const c of H().categories) { const x = v(`#d-b-${c.id}`); if (x !== undefined) d.budgets[c.id] = num(x) || 0; }
   for (const h of d.held) { const x = v(`#d-h-${h.id}`); if (x !== undefined) h.amount = num(x) || 0; }
   for (const e of Calc.earners(H())) { const x = v(`#d-pay-${e.id}`); if (x !== undefined) d.pay[e.id] = x; }
+  for (const x of d.incoming || []) {
+    const n = v(`#d-in-name-${x.id}`); if (n !== undefined) x.name = n.trim() || x.name;
+    const a = v(`#d-in-amt-${x.id}`); if (a !== undefined) x.amount = num(a) || 0;
+  }
+  if (d.incoming && payInChecking()) { const e = Calc.earners(H())[0]; d.pay[e.id] = round2(d.incoming.reduce((a, x) => a + (Number(x.amount) || 0), 0)); }
 }
 
 function viewSetup() {
@@ -1043,6 +1071,11 @@ function viewSetup() {
     body = `<h2>Budgets for ${D.name(N)}</h2><p class="muted">Start from your normal amounts. Trim any this month if things are tight — next month goes back to normal.</p>
       ${H().categories.map(c => `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="d-b-${esc(c.id)}" inputmode="decimal" value="${esc(d.budgets[c.id])}"></div>`).join('')}
       <div class="line total-line"><span>Total</span><b>${money(Object.values(d.budgets).reduce((a, b) => a + (Number(b) || 0), 0))}</b></div>`;
+  } else if (d.step === 4 && payInChecking()) {
+    body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">They land in checking during ${D.name(N)} and pay for ${D.name(D.addMonths(N, 1))}. Change any amount (overtime!) — you can edit them during the month too.</p>
+      ${d.incoming.map(x => `<div class="line"><input class="grow item-in" id="d-in-name-${esc(x.id)}" value="${esc(x.name)}" aria-label="Name"><input class="mini" id="d-in-amt-${esc(x.id)}" inputmode="decimal" value="${esc(x.amount)}" aria-label="Amount"><button class="x small" data-act="d-del" data-kind="incoming" data-id="${esc(x.id)}" aria-label="Remove">×</button></div>`).join('')}
+      <button class="linkish small" data-act="d-in-add">+ Add a paycheck</button>
+      <div class="line total-line"><span>Total</span><b>${money(d.incoming.reduce((a, x) => a + (Number(x.amount) || 0), 0))}</b></div>`;
   } else if (d.step === 4) {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
       <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input id="d-pay-${esc(e.id)}" inputmode="decimal" value="${esc(d.pay[e.id])}"></label>`).join('')}</div>
@@ -1056,6 +1089,7 @@ function viewSetup() {
       ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
       ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
+    ${c.nextPay ? line('−', 'Set aside for next month (paychecks)', c.nextPay) : ''}
       ${line('−', `${D.name(N)} bills still to come`, c.billsLeft)}
       ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
       ${line('−', 'Budgets', c.budgetsLeft)}
@@ -1175,7 +1209,8 @@ function viewSettings() {
 
   <section class="card"><h2>Features</h2>
     ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
-      ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.']].map(([k, l, d]) => {
+      ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.'],
+      ['payInChecking', 'Paychecks land in checking', 'For paychecks that go straight into this checking account during the month (they’re for next month). Check each one off on Overview when it arrives so it’s set aside.']].map(([k, l, d]) => {
       const on = k === 'overview' ? overviewOn() : !!feat(k);
       return `<div class="line feature"><span><b>${l}</b><span class="small muted">${d}</span></span><button class="switch ${on ? 'on' : ''}" data-act="feature" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${l}"><i></i></button></div>`;
     }).join('')}
@@ -1418,7 +1453,7 @@ const acts = {
   'bill-auto': async el => { await B.setMonthField(homeYm(), ['bills', el.dataset.id], B.DEL); },
   'li-toggle': async el => {
     const kind = el.dataset.kind;
-    const flag = kind === 'back' ? 'received' : 'paid';
+    const flag = kind === 'back' || kind === 'incoming' ? 'received' : 'paid';
     await monthList(kind, arr => arr.map(o => (o.id === el.dataset.id ? toggleFlag(o, flag) : o)));
   },
   // Tap an item's name or amount to change it in place.
@@ -1448,7 +1483,7 @@ const acts = {
     const amount = num($(`#add-${kind}-amt`).value);
     if (!name || !amount) { toast('Add a name and an amount'); return; }
     S.adding = null;
-    await monthList(kind, arr => [...arr, kind === 'back' ? { id: newId(), name, amount, received: false } : { id: newId(), name, amount, paid: false }]);
+    await monthList(kind, arr => [...arr, kind === 'back' || kind === 'incoming' ? { id: newId(), name, amount, received: false } : { id: newId(), name, amount, paid: false }]);
   },
   held: async el => { await monthList('held', arr => arr.map(o => (o.id === el.dataset.id ? toggleFlag(o, 'received') : o))); },
   checking: () => {
@@ -1687,6 +1722,7 @@ const acts = {
     S.draft[kind].push(kind === 'back' ? { id: newId(), name, amount, received: false } : { id: newId(), name, amount, paid: false });
     render();
   },
+  'd-in-add': () => { readDraftInputs(); S.draft.incoming.push({ id: newId(), name: `Paycheck ${S.draft.incoming.length + 1}`, amount: 0, received: false }); render(); },
   'd-finish': el => finishSetup(el.dataset.mode),
 
   'cat-add': async () => {

@@ -220,6 +220,14 @@ const Calc = (() => {
     for (const h of M.held || []) {
       if (h.received && (h.receivedAt || 0) > at) { est += Number(h.amount) || 0; since.push({ what: `From ${h.name}`, amount: +h.amount }); }
     }
+    // Paychecks that land in checking during the month are next month's money:
+    // once one arrives it's set aside so it doesn't look like extra this month.
+    let nextPay = 0;
+    for (const x of M.incoming || []) {
+      if (!x.received) continue;
+      if ((x.receivedAt || 0) > at) { est += Number(x.amount) || 0; since.push({ what: x.name || 'Paycheck', amount: +x.amount }); }
+      nextPay += Number(x.amount) || 0;
+    }
     let purchased = 0;
     for (const p of purchases) if ((p.t || 0) > at) purchased += Number(p.amount) || 0;
     if (purchased) { est -= purchased; since.push({ what: 'Purchases logged', amount: -purchased }); }
@@ -234,10 +242,10 @@ const Calc = (() => {
       return { ...c, budget, used, left: round2(budget - used), over: used > budget + 0.004 };
     });
     // Purchases in a category that no longer exists still count as spending.
-    const excess = round2(est + backIn + owed - heldBack - billsLeft - otherLeft - budgetsLeft);
+    const excess = round2(est + backIn + owed - heldBack - nextPay - billsLeft - otherLeft - budgetsLeft);
     return {
       checking: round2(snap.amount), checkedAt: at, est: round2(est), since,
-      backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), billsLeft: round2(billsLeft),
+      backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), nextPay: round2(nextPay), billsLeft: round2(billsLeft),
       otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s,
     };
   }
