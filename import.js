@@ -118,6 +118,8 @@ const Imp = (() => {
       const isBuy = /^pos$/i.test(rec.group) && !rec.credit;
       const isRefund = rec.credit && (/^credit$/i.test(rec.group) || /refund|adjust/i.test(rec.bankCat));
       const venmo = /venmo/i.test(rec.desc);
+      // Cash pulled from checking: it's spending, but only you know what it was for.
+      const atm = !rec.credit && (/atm/i.test(rec.group) || /\batm\b|withdrawal/i.test(rec.desc));
       const row = {
         i, key, ruleKey: ruleKeyFor(rules, mkey), name: prettyName(rec.desc) || rec.desc, date: rec.date, post: rec.post,
         amount: isRefund ? -rec.amount : rec.amount, bankCat: rec.bankCat,
@@ -126,6 +128,7 @@ const Imp = (() => {
       };
       const done = ((months[D.ymOf(rec.date)] || {}).importedKeys || []).includes(key);
       if (done) { row.status = 'dup'; return row; }
+      if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
       if (venmo) { row.reason = rec.credit ? 'Venmo in — your call' : 'Venmo — your call'; row.amount = rec.credit ? -rec.amount : rec.amount; return row; }
       if (!isBuy && !isRefund) { row.status = 'skip'; row.cat = 'skip'; row.reason = rec.credit ? 'Money in (transfer/deposit)' : 'Transfer or payment'; return row; }
       const rule = findRule(rules, mkey);
