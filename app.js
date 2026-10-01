@@ -162,7 +162,26 @@ function render() {
   bn.hidden = !demo;
   if (demo) bn.innerHTML = 'Sample mode — saved in this browser only.';
 }
-document.addEventListener('focusout', () => setTimeout(() => { if (S.pending && !sheetOpen()) render(); }, 0));
+// Leaving a text box saves it:
+//  - tap-to-edit boxes (amounts, names) close back up even if nothing changed
+//    (if something changed, the 'change' handler has already saved it)
+//  - "add" rows (name + amount + Add button) add the item once every box is
+//    filled and you tap somewhere outside the row
+document.addEventListener('focusout', e => {
+  const t = e.target;
+  setTimeout(() => {
+    const now = document.activeElement;
+    if (t.matches && t.matches('.val-in, .item-in') && t.isConnected) S.pending = true;
+    const row = t.closest && t.closest('.add-row');
+    if (row && row.isConnected && !row.contains(now)) {
+      const inputs = [...row.querySelectorAll('input')];
+      const btn = row.querySelector('button[data-act]');
+      if (btn && inputs.length && inputs.every(i => i.value.trim() !== '')) { btn.click(); return; }
+    }
+    if (S.pending && !sheetOpen()) render();
+    else if (S.pending && sheetOpen() && !$('#sheet').contains(now)) render();
+  }, 0);
+});
 
 function drawTabs(r) {
   const t = $('#tabs');
@@ -307,11 +326,10 @@ function billsSections() {
   const moved = M.moved !== null && M.moved !== undefined;
   const excessLabel = moved ? 'Leftover right now' : 'Savings/Excess';
   const line = (sign, label, amt, cls = '') => `<div class="line ${cls}"><span>${sign ? `<i class="sign">${sign}</i>` : ''}${label}</span><b>${money(amt)}</b></div>`;
-  const when = c.checkedAt ? new Date(c.checkedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
   const excessNote = moved
     ? `<p class="small muted">${M.moved >= 0 ? `Moved ${money(M.moved)} to savings` : `Took ${money(-M.moved)} from savings`} when you set up ${D.name(ym)}.${c.excess < -0.004 ? (calm() ? ` Spending is ${money(-c.excess)} past the plan — it’ll come up in review.` : ` Short ${money(-c.excess)}.`) : ''}</p>`
     : '';
-  const checking = `<button class="line tap checking-row" data-act="checking" aria-label="Update checking balance"><span><b>Checking</b> <span class="small muted">(${money(c.checking)} on ${when}${c.since.length ? ', updated since' : ''} · tap to update)</span></span><b class="val-edit">${money(c.est)}</b></button>`;
+  const checking = `<button class="line tap checking-row" data-act="checking" aria-label="Update checking balance"><span><b>Checking</b> <span class="small muted">(updated ${c.checkedAt ? `${new Date(c.checkedAt).getMonth() + 1}/${new Date(c.checkedAt).getDate()}` : '—'})</span></span><b class="val-edit">${money(c.est)}</b></button>`;
   return `
   <section class="card checklist">
     ${checking}
@@ -334,7 +352,7 @@ function billsSections() {
       const shareTotal = hs.reduce((s, h) => s + Number(h.amount || 0), 0);
       // Shared bill: what actually gets charged (our part + theirs), and a
       // marker for each person's transfer -- marking one adds it to checking.
-      const charged = hs.length ? `<span class="small muted">Total charged ≈ ${money(b.charge)} <span class="small">(${money(b.amountNow)} ours + ${money(shareTotal)} theirs)</span></span>` : '';
+      const charged = hs.length ? `<span class="small muted">Total charged ≈ ${money(b.charge)}</span>` : '';
       const extra = !hs.length ? '' : charged + (hs.every(h => h.received) && !S.openShares[b.id]
         ? `<span class="small muted shares"><button class="linkish small" data-act="shares" data-id="${esc(b.id)}" aria-label="Show transfers">✓ ${hs.map(h => esc(h.name)).join(' & ')} sent theirs</button></span>`
         : `<span class="small muted shares">Transfers: ${hs.map(h => `<button class="share ${h.received ? 'on' : ''}" data-act="held" data-id="${esc(h.id)}" aria-pressed="${!!h.received}">${h.received ? '✓' : '○'} ${esc(h.name)} ${money(h.amount)}</button>`).join(' ')}</span>`);
@@ -360,8 +378,8 @@ function listCard(kind, title, items, flag, flagLabel) {
     <h2>${title}</h2>
     ${items.map(o => `<div class="check-row ${o[flag] ? 'done' : ''}">
       <button class="box ${o[flag] ? 'on' : ''}" data-act="li-toggle" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="${flagLabel}">${o[flag] ? '✓' : ''}</button>
-      <span class="grow">${esc(o.name)}${o[flag] ? '' : ` <span class="small muted">${kind === 'back' ? 'expected' : 'pending'}</span>`}</span>
-      <b>${money(o.amount)}</b>
+      <span class="grow"><button class="item-edit" data-act="li-edit" data-kind="${kind}" data-id="${esc(o.id)}" data-f="name" aria-label="Edit name">${esc(o.name)}</button></span>
+      <button class="val-edit" data-act="li-edit" data-kind="${kind}" data-id="${esc(o.id)}" data-f="amount" aria-label="Edit amount">${money(o.amount)}</button>
       <button class="x small" data-act="li-del" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button>
     </div>`).join('')}
     ${adding ? `<div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming in' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
@@ -410,18 +428,6 @@ function viewYear() {
       </div>
       <div class="goal-scale"><span>$0</span></div>
     </div>`;
-  // Year-end: whatever's above the floor can go to the HYSA (once a year).
-  const now = D.curYm();
-  const hysaWindow = now >= `${Y}-12` && now <= `${Y + 1}-01`;
-  const extra = Math.round((actual - floor) * 100) / 100;
-  const hysaDone = (sv.hysaDone || {})[Y];
-  const hysaCard = hysaWindow ? `<section class="card note-card">
-      <h2>Year-end</h2>
-      ${hysaDone ? `<p>Moved ${money(hysaDone)} to the HYSA for ${Y}. 🎉</p>`
-        : extra > 0 ? `<p>You’re ${money(extra)} above your ${money(floor)} floor. Ready to move it to the HYSA?</p><button class="btn" data-act="hysa" data-v="${extra}" data-y="${Y}">Move ${money(extra)} to HYSA</button>`
-          : `<p>Savings is at or under your ${money(floor)} floor, so everything stays in savings this year.</p>`}
-    </section>` : '';
-
   const rows = y.rows;
   const early = rows.filter(r => r.past && !r.hasData);
   const shown = rows.filter(r => !(r.past && !r.hasData));
@@ -438,7 +444,6 @@ function viewYear() {
       ${proj !== null ? (proj >= goalMax ? ' — past your goal! 🎉' : proj >= goalMin ? ' — past the minimum.' : ` — ${money(goalMin - proj)} short of the minimum.`) : ''}</div>
     ${Number(sv.hysa) ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
   </section>
-  ${hysaCard}
   <div class="year-head-row"><h2 class="year-head">Projected Savings</h2>
   ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${shown.map(r => r.ym).join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
   ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : 'Prior data kept in Google Sheets'}</p>` : ''}
@@ -454,23 +459,27 @@ function yearCard(r) {
   if (!open) return `<button class="mcard card collapsed" data-act="expand" data-ym="${r.ym}" data-open="0" aria-expanded="false">${head}</button>`;
   const line = (label, v, cls = '') => `<div class="line ${cls}"><span>${label}</span><b>${v === null || v === undefined || v === '' ? '—' : money(v)}</b></div>`;
   // Tap a value to change it right here (e.g. Nick picking up OT in November).
-  const eline = (label, v, k) => `<div class="line"><span>${label}</span><button class="val-edit" data-act="inc" data-ym="${r.ym}" data-k="${k}" aria-label="Change ${esc(label.replace(/<[^>]+>/g, ''))}">${v === null || v === undefined || v === '' ? '—' : money(v)}</button></div>`;
+  const eline = (label, v, k, est) => `<div class="line"><span>${label}${est ? ' <span class="small muted">usual</span>' : ''}</span><button class="val-edit ${est ? 'est' : ''}" data-act="inc" data-ym="${r.ym}" data-k="${k}" aria-label="Change ${esc(label.replace(/<[^>]+>/g, ''))}">${v === null || v === undefined || v === '' ? '—' : money(v)}</button></div>`;
   const prevName = D.short(D.addMonths(r.ym, -1));
   const hint = { auto: `${prevName} income − expenses − other`, live: 'from this month’s checklist', moved: 'moved at setup', set: 'set by you', noincome: `add ${prevName} income to estimate` }[r.kind] || '';
   const p = r.plan || {};
-  const elev = r.elevate ? eline(`ElevateEMS ${r.elevateToSavings ? '<span class="small muted">(to savings)</span>' : ''}`, r.elevate, 'elevate') : '';
-  const elevBtn = r.elevate && r.elevateToSavings && !p.elevateDone && r.ym <= D.addMonths(homeYm(), 0)
+  // ElevateEMS pay lands in that same month and goes into that month's savings
+  // (it is not a paycheck for next month).
+  const elev = r.elevate ? eline(`Additional income <span class="small muted">ElevateEMS → ${D.short(r.ym)} savings</span>`, r.elevate, 'elevate') : '';
+  const elevBtn = r.elevate && !p.elevateDone && r.ym <= D.addMonths(homeYm(), 0)
     ? `<button class="btn small" data-act="elevate" data-ym="${r.ym}">ElevateEMS pay arrived → add ${money(r.elevate)} to savings</button>` : '';
   return `<section class="mcard card ${r.current ? 'current' : ''}">
     <button class="plain" data-act="expand" data-ym="${r.ym}" data-open="1" aria-expanded="true">${head}</button>
     <div class="mbody">
-      ${eline('Nick income', r.nick, 'nick')}
-      ${eline('Bella income', r.bella, 'bella')}
-      ${elev}
-      ${line('Total <span class="small muted">(for next month)</span>', r.total, 'sub')}
+      <div class="next-funds">
+        ${eline('Nick income', r.nick, 'nick', r.nickEst)}
+        ${eline('Bella income', r.bella, 'bella', r.bellaEst)}
+        ${line('Total <span class="small muted">(for next month)</span>', r.total, 'sub')}
+      </div>
       ${line(`${prevName}${prevName === D.name(D.addMonths(r.ym, -1)) ? '' : '.'} income`, r.prevIn, 'strong')}
       ${eline('Expenses', r.expenses, 'expenses')}
       ${(r.other || []).map(o => line(`<span class="muted">Other:</span> ${esc(o.name)}`, o.amount)).join('')}
+      ${elev}
       ${r.past ? '' : `<div class="line"><span>Savings <span class="small muted">${hint}</span></span><b class="${r.savings < 0 ? 'neg' : ''}">${r.savings === null ? '—' : (r.savings > 0 ? '+' : '') + money(r.savings)}</b></div>`}
       <div class="line total-line"><span>Savings balance</span><b>${r.balance === null ? '—' : money(r.balance)}</b></div>
       ${p.note ? `<p class="small muted">${esc(p.note)}</p>` : ''}
@@ -492,8 +501,7 @@ function openPlan(ym) {
   openSheet(`<div class="sheet-head"><h2>${D.label(ym)}</h2><button class="x" data-act="close">×</button></div>
     <div class="two"><label class="field"><span class="label">Nick income</span><input id="p-nick" inputmode="decimal" value="${v(p.nick)}"></label>
     <label class="field"><span class="label">Bella income</span><input id="p-bella" inputmode="decimal" value="${v(p.bella)}"></label></div>
-    <div class="two"><label class="field"><span class="label">ElevateEMS pay</span><input id="p-elevate" inputmode="decimal" placeholder="only class months" value="${v(p.elevate)}"></label>
-    <label class="field check"><input id="p-elevsav" type="checkbox" ${p.elevateToSavings === false ? '' : 'checked'}> Goes straight to savings</label></div>
+    <label class="field"><span class="label">Additional income — ElevateEMS <span class="muted small">(class months; goes into ${D.name(ym)}’s savings, not next month’s income)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
     <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
       <div class="add-row"><input id="p-oname" placeholder="What"><input id="p-oamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-oadd">Add</button></div></div>
@@ -510,7 +518,7 @@ async function savePlan() {
   const p = {
     ...old,
     nick: val('#p-nick'), bella: val('#p-bella'), elevate: val('#p-elevate'),
-    elevateToSavings: $('#p-elevsav').checked, expenses: val('#p-exp'), savings: val('#p-sav'),
+    elevateToSavings: true, expenses: val('#p-exp'), savings: val('#p-sav'),
     other: S.plan.other, note: $('#p-note').value.trim(),
   };
   for (const k of Object.keys(p)) if (p[k] === null) delete p[k];
@@ -553,6 +561,25 @@ function moveCard() {
   </section>`;
 }
 
+// Every December (and January, in case it slips): move anything above the
+// savings floor to the HYSA, then look ahead to the next year.
+function hysaCard() {
+  const now = D.curYm();
+  const m = D.monthNum(now);
+  if (m !== 12 && m !== 1) return '';
+  const Y = m === 12 ? D.yearOf(now) : D.yearOf(now) - 1;
+  const sv = H().savings || {};
+  if ((sv.hysaDone || {})[Y]) return '';
+  const floor = Number(sv.floor) || 5000;
+  const actual = Number(sv.actual) || 0;
+  const extra = round2(actual - floor);
+  return `<section class="card move-card hysa-card">
+    <div class="line"><span><b>Year-end: transfer to HYSA</b></span><b>${extra > 0 ? money(extra) : '—'}</b></div>
+    <p class="small muted">${extra > 0 ? `Savings is ${money(actual)} — ${money(extra)} above your ${money(floor)} floor. Move that to the HYSA, then tap below.` : `Savings is at or under your ${money(floor)} floor, so nothing moves this year.`}</p>
+    <button class="btn full" data-act="hysa" data-v="${Math.max(0, extra)}" data-y="${Y}">Reset savings to ${money(floor)} and review ${Y + 1}</button>
+  </section>`;
+}
+
 function viewReview() {
   const ym = S.bdYm || homeYm();
   const s = Calc.spent(S.purchases, ym);
@@ -575,6 +602,7 @@ function viewReview() {
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
   const n = nextSetupYm();
   return `<header class="hero small-hero"><h1>Review</h1></header>
+  ${hysaCard()}
   ${moveCard()}
   <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
   <h2 class="section-title">Breakdown</h2>
@@ -674,7 +702,7 @@ function readDraftInputs() {
   if (v('#d-checking') !== undefined) d.checking = v('#d-checking');
   for (const c of H().categories) { const x = v(`#d-b-${c.id}`); if (x !== undefined) d.budgets[c.id] = num(x) || 0; }
   for (const h of d.held) { const x = v(`#d-h-${h.id}`); if (x !== undefined) h.amount = num(x) || 0; }
-  if (v('#d-nick') !== undefined) { d.nick = v('#d-nick'); d.bella = v('#d-bella'); d.elevate = v('#d-elevate'); d.elevateToSavings = $('#d-elevsav').checked; }
+  if (v('#d-nick') !== undefined) { d.nick = v('#d-nick'); d.bella = v('#d-bella'); d.elevate = v('#d-elevate'); d.elevateToSavings = true; }
 }
 
 function viewSetup() {
@@ -720,8 +748,7 @@ function viewSetup() {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
       <div class="two"><label class="field"><span class="label">Nick</span><input id="d-nick" inputmode="decimal" value="${esc(d.nick)}"></label>
       <label class="field"><span class="label">Bella</span><input id="d-bella" inputmode="decimal" value="${esc(d.bella)}"></label></div>
-      <div class="two"><label class="field"><span class="label">ElevateEMS <span class="small muted">(class months)</span></span><input id="d-elevate" inputmode="decimal" value="${esc(d.elevate)}"></label>
-      <label class="field check"><input id="d-elevsav" type="checkbox" ${d.elevateToSavings ? 'checked' : ''}> Goes straight to savings</label></div>`;
+      <label class="field"><span class="label">Additional income — ElevateEMS <span class="small muted">(class months; goes into ${D.name(N)}’s savings)</span></span><input id="d-elevate" inputmode="decimal" value="${esc(d.elevate)}"></label>`;
   } else {
     const M = draftMonth(d);
     const c = Calc.checklist(H(), M, N, S.purchases);
@@ -820,6 +847,14 @@ function viewSettings() {
   </section>
 
   ${monthlyTotalCard()}
+
+  <section class="card"><h2>Usual monthly income</h2>
+    <div class="two">
+      <label class="field"><span class="label">Nick</span><input data-ch="usual" data-f="nick" inputmode="decimal" value="${esc((h.usual || {}).nick)}" placeholder="$"></label>
+      <label class="field"><span class="label">Bella</span><input data-ch="usual" data-f="bella" inputmode="decimal" value="${esc((h.usual || {}).bella)}" placeholder="$"></label>
+    </div>
+    <p class="small muted">Used on the Year tab for any month you haven’t filled in (shown as “usual”). Type a real amount on a month and it takes over.</p>
+  </section>
 
   <section class="card"><h2>Savings goals</h2>
     <div class="three">
@@ -948,6 +983,16 @@ const acts = {
     const flag = kind === 'back' ? 'received' : 'paid';
     await monthList(kind, arr => arr.map(o => (o.id === el.dataset.id ? toggleFlag(o, flag) : o)));
   },
+  // Tap an item's name or amount to change it in place.
+  'li-edit': el => {
+    const { kind, id, f } = el.dataset;
+    const o = ((S.months[homeYm()] || {})[kind] || []).find(x => x.id === id);
+    if (!o) return;
+    el.outerHTML = `<input class="${f === 'amount' ? 'val-in' : 'item-in'}" data-ch="li" data-kind="${kind}" data-id="${esc(id)}" data-f="${f}" ${f === 'amount' ? 'inputmode="decimal"' : ''} value="${esc(o[f])}">`;
+    const inp = view.querySelector(`[data-ch="li"][data-id="${id}"][data-f="${f}"]`);
+    inp.focus();
+    inp.select();
+  },
   'li-del': async el => {
     if (!(await ask('Remove this item?', 'Remove'))) return;
     await monthList(el.dataset.kind, arr => arr.filter(o => o.id !== el.dataset.id));
@@ -1053,11 +1098,15 @@ const acts = {
   hysa: async el => {
     const v = Number(el.dataset.v);
     const Y = el.dataset.y;
-    if (!(await ask(`Move ${money(v)} from savings to the HYSA? Savings will stay at ${money(H().savings.floor)}.`, 'Moved it'))) return;
     const sv = H().savings;
-    await B.setH([[['savings', 'hysa'], round2((Number(sv.hysa) || 0) + v)], [['savings', 'hysaDone', Y], v]]);
-    await setSavings((Number(sv.actual) || 0) - v, `Year-end move to HYSA (${Y})`, 'hysa');
-    confetti();
+    const floor = Number(sv.floor) || 5000;
+    const q = v > 0 ? `Moved ${money(v)} to the HYSA? Savings will be set to ${money(floor)}.` : `Close out ${Y} and look at ${Number(Y) + 1}?`;
+    if (!(await ask(q, v > 0 ? 'Yes, reset' : 'Yes'))) return;
+    await B.setH([[['savings', 'hysa'], round2((Number(sv.hysa) || 0) + v)], [['savings', 'hysaDone', Y], v || 0.01]]);
+    if (v > 0) await setSavings(floor, `Year-end move to HYSA (${Y})`, 'hysa');
+    S.year = Number(Y) + 1;
+    location.hash = '#/year';
+    if (v > 0) { confetti(); toast(`${money(v)} to the HYSA 🎉 Here’s ${Number(Y) + 1}.`); }
   },
 
   'bd-m': el => { S.bdYm = D.addMonths(S.bdYm || homeYm(), Number(el.dataset.d)); render(); },
@@ -1201,6 +1250,12 @@ const changes = {
     const list = (H().helpers || []).map(x => (x.id === el.dataset.id ? { ...x, [f]: f === 'amount' ? num(el.value) || 0 : el.value } : x));
     await B.setH([[['helpers'], list]]);
   },
+  li: async el => {
+    const { kind, id, f } = el.dataset;
+    const v = f === 'amount' ? num(el.value) : el.value.trim();
+    if (v === null || v === '') { render(); return; }
+    await monthList(kind, arr => arr.map(o => (o.id === id ? { ...o, [f]: v } : o)));
+  },
   left: async el => {
     const v = num(el.value);
     if (v === null) { render(); return; }
@@ -1216,6 +1271,7 @@ const changes = {
     await B.setH([[['plans', el.dataset.ym, el.dataset.k], v === null ? B.DEL : v]]);
     toast(`${D.name(el.dataset.ym)} updated`);
   },
+  usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
   font: async el => { await B.setH([[['look', el.dataset.f], el.value]]); },
   calm: async el => { await B.setH([[['look', 'calm'], el.checked]]); },
@@ -1233,8 +1289,8 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'l-amount') { e.preventDefault(); $('#l-note').focus(); }
-  if (e.key === 'Enter' && e.target.matches('.val-in')) { e.preventDefault(); e.target.blur(); }
-  if (e.key === 'Escape' && e.target.matches('.val-in')) { e.target.value = ''; e.target.blur(); render(); }
+  if (e.key === 'Enter' && e.target.matches('.val-in, .item-in')) { e.preventDefault(); e.target.blur(); }
+  if (e.key === 'Escape' && e.target.matches('.val-in, .item-in')) { e.target.value = ''; e.target.blur(); render(); }
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cat[role="button"]')) { e.preventDefault(); openLog({ cat: e.target.dataset.cat }); }
   if (e.key === 'Escape' && sheetOpen()) closeSheet();
 });
