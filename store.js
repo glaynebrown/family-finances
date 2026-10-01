@@ -92,13 +92,21 @@ const Store = (() => {
     // Only recent purchases stay live (keeps daily reads small as the years add
     // up); older months are fetched on demand with loadPurchases().
     unsubs.push(sub('purchases').where('date', '>=', cbs.since).onSnapshot(s => cbs.purchases(s.docs.map(d => ({ id: d.id, ...d.data() }))), err('purchases')));
-    unsubs.push(sub('wallpapers').onSnapshot(s => {
-      const out = {};
-      s.forEach(d => { out[d.id] = d.get('data'); });
-      cbs.wallpapers(out);
-    }, err('wallpapers')));
   }
-  function stop() { unsubs.forEach(u => u()); unsubs = []; }
+  function stop() { unsubs.forEach(u => u()); unsubs = []; if (wallUnsub) wallUnsub(); wallUnsub = null; wallM = null; }
+
+  // Wallpapers are big, so only the month on screen is kept live; the other
+  // eleven are read once, when Settings -> Look is opened.
+  let wallUnsub = null;
+  let wallM = null;
+  function watchWall(m, cb) {
+    m = String(m);
+    if (wallM === m) return;
+    if (wallUnsub) wallUnsub();
+    wallM = m;
+    wallUnsub = sub('wallpapers').doc(m).onSnapshot(d => cb(m, d.exists ? d.get('data') : null), e => console.error('wallpaper', e));
+  }
+  const loadAllWalls = () => sub('wallpapers').get().then(s => { const out = {}; s.forEach(d => { out[d.id] = d.get('data'); }); return out; });
 
   // Change fields on the household. pairs: [[['plans', '2026-10', 'nick'], 4750], ...]
   // (a value of Store.DEL removes the field)
@@ -135,7 +143,7 @@ const Store = (() => {
 
   return {
     configured: true, DEL, onUser, signUp, signIn, reset, signOut, myHousehold, createHousehold,
-    joinHousehold, open, stop, setH, setMonth, setMonthField, savePurchase, savePurchases, loadPurchases, deletePurchase, setWallpaper,
+    joinHousehold, open, stop, setH, setMonth, setMonthField, savePurchase, savePurchases, loadPurchases, deletePurchase, setWallpaper, watchWall, loadAllWalls,
     uid: () => auth.currentUser && auth.currentUser.uid,
   };
 })();

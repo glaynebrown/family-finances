@@ -129,7 +129,13 @@ function applyLook() {
   const fonts = `https://fonts.googleapis.com/css2?${fontParam(look.heading || 'Oswald')}&${fontParam(look.body || 'Nunito')}&display=swap`;
   const link = $('#fonts');
   if (link.href !== fonts) link.href = fonts;
-  const wp = S.wallpapers[String(D.monthNum(ym))];
+  const wm = String(D.monthNum(ym));
+  if (B.watchWall) B.watchWall(wm, (k, data) => {
+    if (data) S.wallpapers[k] = data; else delete S.wallpapers[k];
+    applyLook();
+    if (route() === 'settings') render();
+  });
+  const wp = S.wallpapers[wm];
   $('#wall').style.backgroundImage = wp ? `url("${wp}")` : '';
   document.body.classList.toggle('has-wall', !!wp);
   try { localStorage.setItem('ne-look', JSON.stringify({ vars, fonts })); } catch (e) {}
@@ -971,6 +977,11 @@ async function finishSetup(mode) {
 /* ---------- Settings ---------- */
 
 function viewSettings() {
+  if (B.loadAllWalls && !S.wallsLoaded) {
+    S.wallsLoaded = true;
+    B.loadAllWalls().then(all => { S.wallpapers = { ...all, ...S.wallpapers }; for (const k in all) S.wallpapers[k] = all[k]; render(); })
+      .catch(e => { S.wallsLoaded = false; console.warn('wallpapers', e); });
+  }
   const h = H();
   const look = h.look || {};
   const sv = h.savings || {};
@@ -1410,12 +1421,15 @@ const acts = {
       try {
         const data = await shrinkImage(file);
         await B.setWallpaper(el.dataset.m, data);
+        S.wallpapers[String(el.dataset.m)] = data;
+        applyLook();
+        render();
         toast(`${D.MONTHS[el.dataset.m - 1]} wallpaper saved`);
       } catch (e) { console.error(e); toast('Couldn’t use that picture — try another'); }
     };
     f.click();
   },
-  'wall-del': async el => { await B.setWallpaper(el.dataset.m, null); },
+  'wall-del': async el => { await B.setWallpaper(el.dataset.m, null); delete S.wallpapers[String(el.dataset.m)]; applyLook(); render(); },
   'colors-reset': async () => { await B.setH([[['look', 'colors'], { ...Looks.colors }]]); },
   'copy-code': async () => { try { await navigator.clipboard.writeText(H().joinCode); toast('Code copied'); } catch (e) { toast(H().joinCode); } },
   signout: async () => { if (await ask('Sign out on this device?', 'Sign out')) { await Store.signOut(); location.hash = ''; location.reload(); } },
