@@ -328,6 +328,7 @@ async function saveLog() {
     date: L.date || D.today(), spread: Number(L.spread) || 1,
     by: L.by || me(), byName: L.byName || myName(), t: L.t || Date.now(),
   };
+  rec.until = untilOf(rec);
   if (L.id) rec.id = L.id;
   if (L.src) { rec.src = L.src; rec.key = L.key || ''; }
   const before = Calc.checklist(H(), S.months[D.ymOf(rec.date)], D.ymOf(rec.date), S.purchases).cats.find(c => c.id === rec.cat);
@@ -632,6 +633,7 @@ function hysaCard() {
 
 function viewReview() {
   const ym = S.bdYm || homeYm();
+  setTimeout(() => ensureLoaded(ym).catch(e => console.warn('older purchases', e)), 0);
   const s = Calc.spent(S.purchases, ym);
   const M = S.months[ym];
   const tab = S.bdTab;
@@ -804,7 +806,7 @@ async function saveImport() {
     }
     const base = {
       store: r.name, note: '', date: r.date, spread: 1, by: 'import', byName: 'Bank', src: 'import',
-      key: r.key, t: new Date(`${r.post || r.date}T12:00`).getTime(),
+      key: r.key, t: new Date(`${r.post || r.date}T12:00`).getTime(), until: D.ymOf(r.date),
     };
     if (r.splits) {
       r.splits.forEach((sp, j) => { const a = Number(sp.amount) || 0; if (a) purchases.push({ ...base, key: `${r.key}:${j}`, amount: a, cat: sp.cat || 'uncat', tags: [...new Set([...r.tags, ...(sp.tag ? [sp.tag] : [])])] }); });
@@ -1595,27 +1597,32 @@ function householdScreen(msg = '') {
 
 /* ---------- boot ---------- */
 
-// Purchases: the live window (last 18 months) plus any older months fetched
-// while paging back on Review.
-const LIVE_MONTHS = 18;
-S.since = `${D.addMonths(D.curYm(), -LIVE_MONTHS)}-01`;
+// Purchases: the live window (last month + this month, plus bulk buys still
+// spreading into them) and any older months fetched when Review needs them.
+const HISTORY_MONTHS = 17; // a 12-month chart + up to 6-month bulk spreads
+S.since = `${D.addMonths(D.curYm(), -1)}-01`;
 S.loadedFrom = S.since;
 S.live = [];
 S.older = [];
 function mergePurchases() {
   const ids = new Set(S.live.map(p => p.id));
-  S.purchases = S.live.concat(S.older.filter(p => !ids.has(p.id) && p.date < S.since));
+  S.purchases = S.live.concat(S.older.filter(p => !ids.has(p.id)));
 }
+// Last month a purchase counts in (bulk buys spread over several months).
+const untilOf = p => D.addMonths(D.ymOf(p.date), Math.max(1, Number(p.spread) || 1) - 1);
 // Make sure purchases are loaded far enough back to show month ym (and the
 // 12-month chart / bulk-buy spreads that reach into it).
 async function ensureLoaded(ym) {
-  const need = `${D.addMonths(ym, -LIVE_MONTHS)}-01`;
-  if (need >= S.loadedFrom) return;
-  const got = await B.loadPurchases(need, S.loadedFrom);
-  S.loadedFrom = need;
-  S.older = S.older.concat(got);
-  mergePurchases();
-  render();
+  const need = `${D.addMonths(ym, -HISTORY_MONTHS)}-01`;
+  if (need >= S.loadedFrom || S.loading) return;
+  S.loading = true;
+  try {
+    const got = await B.loadPurchases(need, S.loadedFrom);
+    S.loadedFrom = need;
+    S.older = S.older.concat(got);
+    mergePurchases();
+    render();
+  } finally { S.loading = false; }
 }
 
 const listeners = {

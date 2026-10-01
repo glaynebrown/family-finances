@@ -89,9 +89,15 @@ const Store = (() => {
       s.forEach(d => { out[d.id] = d.data(); });
       cbs.months(out);
     }, err('months')));
-    // Only recent purchases stay live (keeps daily reads small as the years add
-    // up); older months are fetched on demand with loadPurchases().
-    unsubs.push(sub('purchases').where('date', '>=', cbs.since).onSnapshot(s => cbs.purchases(s.docs.map(d => ({ id: d.id, ...d.data() }))), err('purchases')));
+    // Only last month + this month stay live (keeps reads small as the years add
+    // up), plus older bulk buys still spreading into them ('until' = last month a
+    // purchase counts in). Older months are fetched on demand with loadPurchases().
+    let byDate = [];
+    let byUntil = [];
+    const send = () => { const seen = new Set(); cbs.purchases(byDate.concat(byUntil).filter(p => !seen.has(p.id) && seen.add(p.id))); };
+    const docs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
+    unsubs.push(sub('purchases').where('date', '>=', cbs.since).onSnapshot(s => { byDate = docs(s); send(); }, err('purchases')));
+    unsubs.push(sub('purchases').where('until', '>=', cbs.since.slice(0, 7)).onSnapshot(s => { byUntil = docs(s); send(); }, err('purchases')));
   }
   function stop() { unsubs.forEach(u => u()); unsubs = []; if (wallUnsub) wallUnsub(); wallUnsub = null; wallM = null; }
 
