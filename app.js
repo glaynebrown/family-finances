@@ -1213,8 +1213,12 @@ const acts = {
     const ym = homeYm();
     const b = H().bills.find(x => x.id === el.dataset.id);
     const st = Calc.billStatus(S.months[ym], b, ym);
-    // Paid on its due date if that's passed (so it isn't subtracted twice from checking).
-    await B.setMonthField(ym, ['bills', b.id], { paid: !st.paid, at: Math.min(Date.now(), st.due), manual: true });
+    const paid = !st.paid;
+    // If the tap lands where the due date would have it anyway, go back to
+    // automatic (no "set by hand" note). Otherwise remember it was set by hand,
+    // paid on its due date if that's passed (so checking isn't charged twice).
+    const auto = Date.now() >= st.due;
+    await B.setMonthField(ym, ['bills', b.id], paid === auto ? B.DEL : { paid, at: Math.min(Date.now(), st.due), manual: true });
   },
   'bill-auto': async el => { await B.setMonthField(homeYm(), ['bills', el.dataset.id], B.DEL); },
   'li-toggle': async el => {
