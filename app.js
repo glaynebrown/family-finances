@@ -256,9 +256,7 @@ function viewHome() {
   <div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>
   ${S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
-    <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span></div>
-    <div class="bar thin"><i style="width:${pct}%"></i></div>
-    <div class="small muted">${money(totalU)} of ${money(totalB)} spent${overs.length ? ` · ${overs.length} ${calm() ? 'to look at during review' : 'over budget'}` : ''}</div>
+    <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
     ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
