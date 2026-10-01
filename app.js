@@ -10,9 +10,8 @@ const S = {
   user: null, hid: null, H: null, months: {}, purchases: [], wallpapers: {},
   gotH: false, gotM: false, gotP: false,
   bdYm: null, bdTab: 'cat', year: null, open: {}, sinceOpen: false,
-  draft: null, pending: false,
-  budOpen: (() => { try { return localStorage.getItem('ne-bud') !== '0'; } catch (e) { return true; } })(),
-  ovOpen: (() => { try { return localStorage.getItem('ne-ov') !== '0'; } catch (e) { return true; } })(),
+  draft: null, pending: false, openShares: {}, adding: null,
+  page: (() => { try { return localStorage.getItem('ne-page') === 'budgets' ? 'budgets' : 'overview'; } catch (e) { return 'overview'; } })(),
 };
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -184,14 +183,16 @@ function catCard(c) {
   const pct = c.budget > 0 ? Math.min(100, (c.used / c.budget) * 100) : (c.used > 0 ? 100 : 0);
   const normal = Number((catById(c.id) || {}).budget) || 0;
   const trimmed = c.budget !== normal ? `<span class="muted small"> · ${c.budget < normal ? 'trimmed' : 'raised'} from ${money(normal)}</span>` : '';
+  // Tapping the amount left changes this month's budget for the category;
+  // tapping anywhere else on the card logs a purchase.
   const right = c.over
-    ? `<b class="over-txt">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</b>`
-    : `<b>${money(c.left)}</b> <span class="muted small">left</span>`;
-  return `<button class="cat card ${c.over ? 'over' : ''}" data-act="log" data-cat="${esc(c.id)}">
+    ? `<button class="val-edit over-txt" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</button>`
+    : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
+  return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="log" data-cat="${esc(c.id)}">
     <div class="row between"><span class="cat-name"><span class="emoji">${esc(c.emoji || '•')}</span>${esc(c.name)}</span><span>${right}</span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="small muted">${money(c.used)} of ${money(c.budget)}${trimmed}${c.over ? (calm() ? ' · flagged for review' : '') : ''}</div>
-  </button>`;
+  </div>`;
 }
 
 function purchaseRow(p, showPart = true) {
@@ -218,7 +219,6 @@ function viewHome() {
   const totalU = c.cats.reduce((s, x) => s + x.used, 0);
   const pct = totalB ? Math.min(100, (totalU / totalB) * 100) : 0;
   const overs = c.cats.filter(x => x.over);
-  const recent = c.spent.list.slice(0, 8);
   return `
   <header class="hero">
     <a class="gear" href="#/settings" aria-label="Settings">${icons.gear}</a>
@@ -227,20 +227,14 @@ function viewHome() {
     <div class="hero-sub">${sub}</div>
   </header>
   ${M && M.setup ? '' : `<div class="card note-card"><p><b>${D.name(ym)} isn’t set up yet.</b> You can still log purchases — they’ll count against your normal budgets.</p><a class="btn" href="#/setup">Set up ${D.name(ym)}</a></div>`}
-  <div class="panel">${billsSections()}</div>
-  <div class="panel">
-  <div class="row between section-head"><h2 class="section-title">Budgets</h2><button class="linkish small collapse" data-act="bud" aria-expanded="${S.budOpen}">${S.budOpen ? 'Collapse ▲' : 'Expand ▼'}</button></div>
-  <section class="card total">
-    <div class="row between"><span class="label">Spending money left</span><b class="big">${money(Math.max(0, totalB - totalU))}</b></div>
-    <div class="bar"><i style="width:${pct}%"></i></div>
-    <div class="small muted">${money(totalU)} of ${money(totalB)} across your categories${overs.length ? ` · ${overs.length} ${calm() ? 'to look at during review' : 'over budget'}` : ''}</div>
-  </section>
-  ${S.budOpen ? `<section class="cats">${c.cats.map(catCard).join('')}</section>
-  <section class="card">
-    <div class="row between"><h2>Recent</h2><a class="small" href="#/review">All ›</a></div>
-    ${recent.length ? recent.map(p => purchaseRow(p)).join('') : `<p class="muted">Nothing logged yet this month. Tap <b>+ Log</b> after a store run.</p>`}
-  </section>` : ''}
-  </div>`;
+  <div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>
+  ${S.page === 'overview' ? billsSections() : `
+  <div class="spend-sum">
+    <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span></div>
+    <div class="bar thin"><i style="width:${pct}%"></i></div>
+    <div class="small muted">${money(totalU)} of ${money(totalB)} spent${overs.length ? ` · ${overs.length} ${calm() ? 'to look at during review' : 'over budget'}` : ''}</div>
+  </div>
+  <section class="cats">${c.cats.map(catCard).join('')}</section>`}`;
 }
 
 /* ---------- Log a purchase (sheet) ---------- */
@@ -317,37 +311,22 @@ function billsSections() {
   const excessLabel = moved ? 'Leftover right now' : 'Savings/Excess';
   const line = (sign, label, amt, cls = '') => `<div class="line ${cls}"><span>${sign ? `<i class="sign">${sign}</i>` : ''}${label}</span><b>${money(amt)}</b></div>`;
   const when = c.checkedAt ? new Date(c.checkedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
-  let moveBtn = '';
-  if (M.setup && !moved) {
-    moveBtn = c.excess >= 0
-      ? `<button class="btn full" data-act="move" data-v="${c.excess}">Move ${money(c.excess)} to savings</button>`
-      : `<button class="btn full ghost" data-act="move" data-v="${c.excess}">Take ${money(-c.excess)} from savings</button>`;
-  }
   const excessNote = moved
     ? `<p class="small muted">${M.moved >= 0 ? `Moved ${money(M.moved)} to savings` : `Took ${money(-M.moved)} from savings`} when you set up ${D.name(ym)}.${c.excess < -0.004 ? (calm() ? ` Spending is ${money(-c.excess)} past the plan — it’ll come up in review.` : ` Short ${money(-c.excess)}.`) : ''}</p>`
     : '';
-  const open = S.ovOpen;
-  const checking = `<button class="line tap" data-act="checking" aria-label="Update checking balance"><span><b>Checking</b> <span class="small muted">(${money(c.checking)} on ${when}${c.since.length ? ', updated since' : ''} · tap to update)</span></span><b class="val-edit">${money(c.est)}</b></button>`;
-  const head = `<div class="row between section-head"><h2 class="section-title">Overview</h2><button class="linkish small collapse" data-act="ov" aria-expanded="${open}">${open ? 'Collapse ▲' : 'Expand ▼'}</button></div>`;
-  if (!open) {
-    return `${head}<section class="card checklist">${checking}
-      <div class="line total-line ${c.excess < -0.004 ? 'neg' : ''}"><span>${excessLabel}</span><b>${money(c.excess)}</b></div>
-      ${moveBtn ? `<div class="stack">${moveBtn}</div>` : ''}</section>`;
-  }
+  const checking = `<button class="line tap checking-row" data-act="checking" aria-label="Update checking balance"><span><b>Checking</b> <span class="small muted">(${money(c.checking)} on ${when}${c.since.length ? ', updated since' : ''} · tap to update)</span></span><b class="val-edit">${money(c.est)}</b></button>`;
   return `
-  ${head}
   <section class="card checklist">
     ${checking}
     ${c.since.length ? `<button class="linkish small" data-act="since">${S.sinceOpen ? 'Hide' : 'What changed since then?'}</button>
       ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}</div>` : ''}` : ''}
-    ${c.backIn ? line('+', 'Money coming back', c.backIn) : ''}
-    ${c.helpIn ? line('+', 'Shared plan payments not in yet', c.helpIn) : ''}
+    ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
+    ${c.helpIn ? line('+', 'Shared payments not in yet', c.helpIn) : ''}
     ${line('−', 'Bills still to come', c.billsLeft)}
     ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
     ${line('−', 'Budget left to spend', c.budgetsLeft)}
     <div class="line total-line ${c.excess < -0.004 ? 'neg' : ''}"><span>${excessLabel}</span><b>${money(c.excess)}</b></div>
     ${excessNote}
-    ${moveBtn ? `<div class="stack">${moveBtn}</div>` : ''}
   </section>
 
   <section class="card">
@@ -355,7 +334,13 @@ function billsSections() {
     <p class="small muted">These check themselves off on their due date. Tap to change one if something’s off.</p>
     ${c.bills.map(b => {
       const hs = helpersBy[b.id] || [];
-      const extra = hs.length ? `<span class="small muted">+ ${money(hs.reduce((s, h) => s + Number(h.amount || 0), 0))} from ${hs.map(h => esc(h.name)).join(' & ')}</span>` : '';
+      const shareTotal = hs.reduce((s, h) => s + Number(h.amount || 0), 0);
+      // Shared bill: what actually gets charged (our part + theirs), and a
+      // marker for each person's transfer -- marking one adds it to checking.
+      const charged = hs.length ? `<span class="small muted">Total charged ≈ ${money(b.charge)} <span class="small">(${money(b.amountNow)} ours + ${money(shareTotal)} theirs)</span></span>` : '';
+      const extra = !hs.length ? '' : charged + (hs.every(h => h.received) && !S.openShares[b.id]
+        ? `<span class="small muted shares"><button class="linkish small" data-act="shares" data-id="${esc(b.id)}" aria-label="Show transfers">✓ ${hs.map(h => esc(h.name)).join(' & ')} sent theirs</button></span>`
+        : `<span class="small muted shares">Transfers: ${hs.map(h => `<button class="share ${h.received ? 'on' : ''}" data-act="held" data-id="${esc(h.id)}" aria-pressed="${!!h.received}">${h.received ? '✓' : '○'} ${esc(h.name)} ${money(h.amount)}</button>`).join(' ')}</span>`);
       return `<div class="check-row ${b.paid ? 'done' : ''}">
         <button class="box ${b.paid ? 'on' : ''}" data-act="bill" data-id="${esc(b.id)}" aria-label="Paid">${b.paid ? '✓' : ''}</button>
         <span class="day">${D.ordinal(b.day)}</span>
@@ -366,32 +351,35 @@ function billsSections() {
   </section>
 
   ${listCard('other', 'Other expenses this month', M.other || [], 'paid', 'Paid')}
-  ${listCard('back', 'Money back', M.back || [], 'received', 'Received')}
-
-  <section class="card">
-    <h2>Shared plan payments</h2>
-    <p class="small muted">Their part of shared bills. It passes through checking until the bill posts.</p>
-    ${(M.held || []).map(h => {
-      const bill = (H().bills || []).find(b => b.id === h.bill);
-      return `<div class="check-row ${h.received ? 'done' : ''}">
-        <button class="box ${h.received ? 'on' : ''}" data-act="held" data-id="${esc(h.id)}" aria-label="Received">${h.received ? '✓' : ''}</button>
-        <span class="grow">${esc(h.name)} <span class="small muted">${esc(bill ? bill.name : 'a bill')} · ${h.received ? 'received' : 'not in yet'}</span></span>
-        <b>${money(h.amount)}</b></div>`;
-    }).join('') || '<p class="muted small">None this month. (Set these up in Settings.)</p>'}
-  </section>`;
+  ${listCard('back', 'Additional income', M.back || [], 'received', 'Received')}
+  ${[['other', 'other expense'], ['back', 'additional income']].filter(([k]) => !(M[k] || []).length && S.adding !== k)
+    .map(([k, l]) => `<button class="linkish small add-link" data-act="li-open" data-kind="${k}">+ Add ${l}</button>`).join('')}`;
 }
 
 function listCard(kind, title, items, flag, flagLabel) {
+  const adding = S.adding === kind;
+  if (!items.length && !adding) return '';
   return `<section class="card">
     <h2>${title}</h2>
     ${items.map(o => `<div class="check-row ${o[flag] ? 'done' : ''}">
       <button class="box ${o[flag] ? 'on' : ''}" data-act="li-toggle" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="${flagLabel}">${o[flag] ? '✓' : ''}</button>
-      <span class="grow">${esc(o.name)}${o[flag] ? '' : ` <span class="small muted">${kind === 'back' ? 'waiting' : 'pending'}</span>`}</span>
+      <span class="grow">${esc(o.name)}${o[flag] ? '' : ` <span class="small muted">${kind === 'back' ? 'expected' : 'pending'}</span>`}</span>
       <b>${money(o.amount)}</b>
       <button class="x small" data-act="li-del" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button>
-    </div>`).join('') || `<p class="muted small">Nothing here.</p>`}
-    <div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming back' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
+    </div>`).join('')}
+    ${adding ? `<div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming in' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
+      <button class="linkish small" data-act="li-open" data-kind="">Cancel</button>`
+      : `<button class="linkish small add-link" data-act="li-open" data-kind="${kind}">+ Add</button>`}
   </section>`;
+}
+
+// Check/uncheck an item. Re-checking something that was already in before the
+// last checking balance keeps its old time, so it isn't counted twice.
+function toggleFlag(o, flag) {
+  const key = flag + 'At';
+  if (o[flag]) return { ...o, [flag]: false };
+  const snap = ((S.months[homeYm()] || {}).checking || {}).at || 0;
+  return { ...o, [flag]: true, [key]: o[key] && o[key] <= snap ? o[key] : Date.now() };
 }
 
 async function monthList(kind, fn) {
@@ -548,6 +536,21 @@ function nextSetupYm() {
 
 /* ---------- Breakdown ---------- */
 
+// End of month: move this month's Savings/Excess into (or out of) savings.
+function moveCard() {
+  const ym = homeYm();
+  const M = S.months[ym];
+  if (!M || !M.setup || (M.moved !== null && M.moved !== undefined)) return '';
+  const c = Calc.checklist(H(), M, ym, S.purchases);
+  return `<section class="card move-card">
+    <div class="line"><span><b>${D.name(ym)} Savings/Excess</b></span><b>${money(c.excess)}</b></div>
+    <p class="small muted">${c.excess >= 0 ? 'Move it over when you set up next month.' : 'Spending went past the plan — cover it from savings when you set up next month.'}</p>
+    ${c.excess >= 0
+      ? `<button class="btn full" data-act="move" data-v="${c.excess}">Move ${money(c.excess)} to savings</button>`
+      : `<button class="btn full ghost" data-act="move" data-v="${c.excess}">Take ${money(-c.excess)} from savings</button>`}
+  </section>`;
+}
+
 function viewReview() {
   const ym = S.bdYm || homeYm();
   const s = Calc.spent(S.purchases, ym);
@@ -570,6 +573,7 @@ function viewReview() {
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
   const n = nextSetupYm();
   return `<header class="hero small-hero"><h1>Review</h1></header>
+  ${moveCard()}
   <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
   <h2 class="section-title">Breakdown</h2>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
@@ -624,7 +628,7 @@ function openItem(key) {
 
 /* ---------- Month setup (the Checklist, step by step) ---------- */
 
-const STEPS = ['Look back', 'Checking', 'Bills & extras', 'Shared plan payments', 'Budgets', 'Paychecks', 'Savings'];
+const STEPS = ['Look back', 'Checking', 'Bills & extras', 'Budgets', 'Paychecks', 'Savings'];
 
 function startDraft() {
   const N = nextSetupYm();
@@ -693,23 +697,24 @@ function viewSetup() {
     const est = Calc.checklist(H(), S.months[cur], cur, S.purchases).est;
     body = `<h2>Checking balance</h2><p class="muted">What does joint checking show right now?</p>
       <label class="amount"><span>$</span><input id="d-checking" inputmode="decimal" placeholder="${est}" value="${esc(d.checking)}"></label>
-      <p class="small muted">The app’s estimate is ${money(est)}. Money you’re still expecting back gets added on the next step.</p>`;
+      <p class="small muted">The app’s estimate is ${money(est)}. Additional income you’re still expecting gets added on the next step.</p>`;
   } else if (d.step === 2) {
-    const bills = (H().bills || []).map(b => `<div class="line"><span>${D.ordinal(b.day)} · ${esc(b.name)}</span><b>${money(Calc.billAmount(b, N))}</b></div>`).join('');
+    const bills = (H().bills || []).map(b => {
+      const hs = d.held.filter(h => h.bill === b.id);
+      return `<div class="line"><span>${D.ordinal(b.day)} · ${esc(b.name)}</span><b>${money(Calc.billAmount(b, N))}</b></div>`
+        + hs.map(h => `<div class="check-row share-row ${h.received ? 'done' : ''}"><button class="box ${h.received ? 'on' : ''}" data-act="d-toggle" data-kind="held" data-id="${esc(h.id)}" aria-label="Received">${h.received ? '✓' : ''}</button><span class="grow">${esc(h.name)}’s share <span class="small muted">${h.received ? 'in checking' : 'not in yet'}</span></span><input class="mini" id="d-h-${esc(h.id)}" inputmode="decimal" value="${esc(h.amount)}"></div>`).join('');
+    }).join('');
     const rows = (kind, flag) => d[kind].map(o => `<div class="check-row ${o[flag] ? 'done' : ''}"><button class="box ${o[flag] ? 'on' : ''}" data-act="d-toggle" data-kind="${kind}" data-id="${esc(o.id)}">${o[flag] ? '✓' : ''}</button><span class="grow">${esc(o.name)}${o.carried ? ' <span class="small muted">carried over</span>' : ''}</span><b>${money(o.amount)}</b><button class="x small" data-act="d-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></div>`).join('') || '<p class="muted small">None</p>';
     const add = kind => `<div class="add-row"><input id="d-${kind}-name" placeholder="What"><input id="d-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="d-add" data-kind="${kind}">Add</button></div>`;
     body = `<h2>Bills & extras for ${D.name(N)}</h2>
-      <h3>Automatic payments</h3>${bills}<p class="small muted">Change these in Settings → Bills.</p>
+      <h3>Automatic payments</h3>${bills}<p class="small muted">Check off shared payments that are already in. Change bills in Settings.</p>
       <h3>Other expenses</h3><p class="small muted">One-time things this month. Check any that are already paid.</p>${rows('other', 'paid')}${add('other')}
-      <h3>Money back</h3><p class="small muted">Refunds you’re still waiting on.</p>${rows('back', 'received')}${add('back')}`;
+      <h3>Additional income</h3><p class="small muted">Refunds or extra money you’re expecting this month.</p>${rows('back', 'received')}${add('back')}`;
   } else if (d.step === 3) {
-    body = `<h2>Shared plan payments</h2><p class="muted">Their part of shared bills. Check each one once it’s in checking.</p>
-      ${d.held.map(h => { const bill = (H().bills || []).find(b => b.id === h.bill); return `<div class="check-row ${h.received ? 'done' : ''}"><button class="box ${h.received ? 'on' : ''}" data-act="d-toggle" data-kind="held" data-id="${esc(h.id)}">${h.received ? '✓' : ''}</button><span class="grow">${esc(h.name)} <span class="small muted">${esc(bill ? bill.name : 'a bill')}</span></span><input class="mini" id="d-h-${esc(h.id)}" inputmode="decimal" value="${esc(h.amount)}"></div>`; }).join('') || '<p class="muted small">No shared plan payments set up. (Settings → Shared plan payments)</p>'}`;
-  } else if (d.step === 4) {
     body = `<h2>Budgets for ${D.name(N)}</h2><p class="muted">Start from your normal amounts. Trim any this month if things are tight — next month goes back to normal.</p>
       ${H().categories.map(c => `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="d-b-${esc(c.id)}" inputmode="decimal" value="${esc(d.budgets[c.id])}"></div>`).join('')}
       <div class="line total-line"><span>Total</span><b>${money(Object.values(d.budgets).reduce((a, b) => a + (Number(b) || 0), 0))}</b></div>`;
-  } else if (d.step === 5) {
+  } else if (d.step === 4) {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
       <div class="two"><label class="field"><span class="label">Nick</span><input id="d-nick" inputmode="decimal" value="${esc(d.nick)}"></label>
       <label class="field"><span class="label">Bella</span><input id="d-bella" inputmode="decimal" value="${esc(d.bella)}"></label></div>
@@ -721,8 +726,8 @@ function viewSetup() {
     const line = (sign, label, amt) => `<div class="line"><span><i class="sign">${sign}</i>${label}</span><b>${money(amt)}</b></div>`;
     body = `<h2>Savings/Excess</h2>
       <div class="line"><span>Checking</span><b>${money(c.est)}</b></div>
-      ${c.backIn ? line('+', 'Money coming back', c.backIn) : ''}
-      ${c.helpIn ? line('+', 'Shared plan payments not in yet', c.helpIn) : ''}
+      ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
+      ${c.helpIn ? line('+', 'Shared payments not in yet', c.helpIn) : ''}
       ${line('−', `${D.name(N)} bills still to come`, c.billsLeft)}
       ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
       ${line('−', 'Budgets', c.budgetsLeft)}
@@ -770,7 +775,6 @@ function viewSettings() {
   const h = H();
   const look = h.look || {};
   const sv = h.savings || {};
-  const billOpts = sel => (h.bills || []).map(b => `<option value="${esc(b.id)}" ${b.id === sel ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
   return `<header class="hero small-hero"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1></header>
 
   <section class="card"><h2>You</h2>
@@ -802,20 +806,15 @@ function viewSettings() {
       <input class="mini" data-ch="bill" data-id="${esc(b.id)}" data-f="amount" inputmode="decimal" value="${esc(b.amount)}" aria-label="Amount">
       <button class="x small" data-act="bill-del" data-id="${esc(b.id)}" aria-label="Remove">×</button></div>
       ${(b.changes || []).map((ch, i) => `<div class="small muted change">→ ${money(ch.amount)} starting ${D.label(ch.from)} <button class="linkish small" data-act="chg-del" data-id="${esc(b.id)}" data-i="${i}">remove</button></div>`).join('')}
+      ${(h.helpers || []).filter(x => x.bill === b.id).map(x => `<div class="edit-row share-edit"><span class="small muted">Shared:</span>
+        <input class="grow" data-ch="help" data-id="${esc(x.id)}" data-f="name" value="${esc(x.name)}" aria-label="Who">
+        <input class="mini" data-ch="help" data-id="${esc(x.id)}" data-f="amount" inputmode="decimal" value="${esc(x.amount)}" aria-label="Their share">
+        <button class="x small" data-act="help-del" data-id="${esc(x.id)}" aria-label="Remove">×</button></div>`).join('')}
+      <details class="small"><summary>Add someone’s share</summary><div class="add-row"><input id="help-name-${esc(b.id)}" placeholder="Who"><input id="help-amt-${esc(b.id)}" inputmode="decimal" placeholder="$"><button class="btn small" data-act="help-add" data-id="${esc(b.id)}">Add</button></div><p class="small muted">For family on a shared plan who send you their part each month.</p></details>
       <details class="small"><summary>Schedule a change</summary><div class="add-row"><input type="month" id="chg-m-${esc(b.id)}" value="${D.addMonths(homeYm(), 1)}"><input id="chg-a-${esc(b.id)}" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="chg-add" data-id="${esc(b.id)}">Add</button></div></details>
     </div>`).join('')}
     <div class="line subtotal"><span>Bills total</span><b>${money((h.bills || []).reduce((a, b) => a + (Number(b.amount) || 0), 0))}</b></div>
     <div class="add-row"><input id="bill-day" class="mini" inputmode="numeric" placeholder="Day"><input id="bill-name" placeholder="New bill"><input id="bill-amt" class="mini" inputmode="decimal" placeholder="$"><button class="btn small" data-act="bill-add">Add</button></div>
-  </section>
-
-  <section class="card"><h2>Shared plan payments</h2><p class="small muted">Their part of shared bills, sent each month. It passes through checking until the bill posts.</p>
-    ${(h.helpers || []).map(x => `<div class="edit-row">
-      <input class="grow" data-ch="help" data-id="${esc(x.id)}" data-f="name" value="${esc(x.name)}" aria-label="Who">
-      <input class="mini" data-ch="help" data-id="${esc(x.id)}" data-f="amount" inputmode="decimal" value="${esc(x.amount)}" aria-label="Amount">
-      <select data-ch="help" data-id="${esc(x.id)}" data-f="bill">${billOpts(x.bill)}</select>
-      <button class="x small" data-act="help-del" data-id="${esc(x.id)}" aria-label="Remove">×</button></div>`).join('')}
-    <div class="add-row"><input id="help-name" placeholder="Who"><input id="help-amt" class="mini" inputmode="decimal" placeholder="$"><select id="help-bill">${billOpts('att')}</select><button class="btn small" data-act="help-add">Add</button></div>
-    <p class="small muted">Changes here start with the next month you set up.</p>
   </section>
 
   ${monthlyTotalCard()}
@@ -933,32 +932,40 @@ const acts = {
   },
 
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
-  bud: () => { S.budOpen = !S.budOpen; try { localStorage.setItem('ne-bud', S.budOpen ? '1' : '0'); } catch (e) {} render(); },
-  ov: () => { S.ovOpen = !S.ovOpen; try { localStorage.setItem('ne-ov', S.ovOpen ? '1' : '0'); } catch (e) {} render(); },
+  page: el => { S.page = el.dataset.v; try { localStorage.setItem('ne-page', S.page); } catch (e) {} window.scrollTo(0, 0); render(); },
   bill: async el => {
     const ym = homeYm();
     const b = H().bills.find(x => x.id === el.dataset.id);
     const st = Calc.billStatus(S.months[ym], b, ym);
-    await B.setMonthField(ym, ['bills', b.id], { paid: !st.paid, at: Date.now(), manual: true });
+    // Paid on its due date if that's passed (so it isn't subtracted twice from checking).
+    await B.setMonthField(ym, ['bills', b.id], { paid: !st.paid, at: Math.min(Date.now(), st.due), manual: true });
   },
   'bill-auto': async el => { await B.setMonthField(homeYm(), ['bills', el.dataset.id], B.DEL); },
   'li-toggle': async el => {
     const kind = el.dataset.kind;
     const flag = kind === 'back' ? 'received' : 'paid';
-    await monthList(kind, arr => arr.map(o => (o.id === el.dataset.id ? { ...o, [flag]: !o[flag], [flag + 'At']: Date.now() } : o)));
+    await monthList(kind, arr => arr.map(o => (o.id === el.dataset.id ? toggleFlag(o, flag) : o)));
   },
   'li-del': async el => {
     if (!(await ask('Remove this item?', 'Remove'))) return;
     await monthList(el.dataset.kind, arr => arr.filter(o => o.id !== el.dataset.id));
+  },
+  shares: el => { S.openShares[el.dataset.id] = true; render(); },
+  'li-open': el => {
+    if (document.activeElement) document.activeElement.blur();
+    S.adding = el.dataset.kind || null;
+    render();
+    if (S.adding) setTimeout(() => { const i = $(`#add-${S.adding}-name`); i && i.focus(); }, 0);
   },
   'li-add': async el => {
     const kind = el.dataset.kind;
     const name = $(`#add-${kind}-name`).value.trim();
     const amount = num($(`#add-${kind}-amt`).value);
     if (!name || !amount) { toast('Add a name and an amount'); return; }
+    S.adding = null;
     await monthList(kind, arr => [...arr, kind === 'back' ? { id: newId(), name, amount, received: false } : { id: newId(), name, amount, paid: false }]);
   },
-  held: async el => { await monthList('held', arr => arr.map(o => (o.id === el.dataset.id ? { ...o, received: !o.received, receivedAt: Date.now() } : o))); },
+  held: async el => { await monthList('held', arr => arr.map(o => (o.id === el.dataset.id ? toggleFlag(o, 'received') : o))); },
   checking: () => {
     const ym = homeYm();
     const c = Calc.checklist(H(), S.months[ym], ym, S.purchases);
@@ -990,6 +997,15 @@ const acts = {
   yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
   plan: el => openPlan(el.dataset.ym),
+  left: el => {
+    const cat = el.dataset.cat;
+    const ym = homeYm();
+    const c = Calc.checklist(H(), S.months[ym], ym, S.purchases).cats.find(x => x.id === cat);
+    el.outerHTML = `<input class="val-in" data-ch="left" data-cat="${esc(cat)}" inputmode="decimal" value="${Math.max(0, c.left)}" placeholder="$" aria-label="Left in ${esc(c.name)}">`;
+    const inp = view.querySelector(`.val-in[data-cat="${cat}"]`);
+    inp.focus();
+    inp.select();
+  },
   inc: el => {
     const { ym, k } = el.dataset;
     const cur = ((H().plans || {})[ym] || {})[k];
@@ -1121,11 +1137,13 @@ const acts = {
     const bills = H().bills.map(b => (b.id === el.dataset.id ? { ...b, changes: b.changes.filter((_, i) => i !== Number(el.dataset.i)) } : b));
     await B.setH([[['bills'], bills]]);
   },
-  'help-add': async () => {
-    const name = $('#help-name').value.trim();
-    const amount = num($('#help-amt').value);
+  'help-add': async el => {
+    const bill = el.dataset.id;
+    const name = $(`#help-name-${bill}`).value.trim();
+    const amount = num($(`#help-amt-${bill}`).value);
     if (!name || !amount) { toast('Add a name and an amount'); return; }
-    await B.setH([[['helpers'], [...(H().helpers || []), { id: newId(), name, amount, bill: $('#help-bill').value }]]]);
+    await B.setH([[['helpers'], [...(H().helpers || []), { id: newId(), name, amount, bill }]]]);
+    toast('Starts with the next month you set up');
   },
   'help-del': async el => { await B.setH([[['helpers'], (H().helpers || []).filter(x => x.id !== el.dataset.id)]]); },
   wall: el => {
@@ -1151,6 +1169,7 @@ const acts = {
 };
 
 document.addEventListener('click', e => {
+  if (e.target.closest('input, select, textarea, label')) return;
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const fn = acts[el.dataset.act];
@@ -1179,6 +1198,16 @@ const changes = {
     const list = (H().helpers || []).map(x => (x.id === el.dataset.id ? { ...x, [f]: f === 'amount' ? num(el.value) || 0 : el.value } : x));
     await B.setH([[['helpers'], list]]);
   },
+  left: async el => {
+    const v = num(el.value);
+    if (v === null) { render(); return; }
+    const ym = homeYm();
+    const c = Calc.checklist(H(), S.months[ym], ym, S.purchases).cats.find(x => x.id === el.dataset.cat);
+    const budget = round2(c.used + v);
+    if (budget === c.budget) { render(); return; }
+    await B.setMonth(ym, { budgets: { [c.id]: budget } });
+    toast(`${c.name}: ${money(v)} left · ${D.name(ym)} budget ${money(budget)} (${budget > c.budget ? '+' : '−'}${money(Math.abs(budget - c.budget))})`);
+  },
   inc: async el => {
     const v = num(el.value);
     await B.setH([[['plans', el.dataset.ym, el.dataset.k], v === null ? B.DEL : v]]);
@@ -1202,6 +1231,8 @@ document.addEventListener('input', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'l-amount') { e.preventDefault(); $('#l-note').focus(); }
   if (e.key === 'Enter' && e.target.matches('.val-in')) { e.preventDefault(); e.target.blur(); }
+  if (e.key === 'Escape' && e.target.matches('.val-in')) { e.target.value = ''; e.target.blur(); render(); }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cat[role="button"]')) { e.preventDefault(); openLog({ cat: e.target.dataset.cat }); }
   if (e.key === 'Escape' && sheetOpen()) closeSheet();
 });
 

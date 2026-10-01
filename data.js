@@ -137,8 +137,9 @@ function seedHousehold(uid, name) {
         { id: 'b2', name: 'Chase overpayment (Subaru, Sept)', amount: 613, received: false },
       ],
       held: [
-        { id: 'demaris', name: 'Demaris', amount: 31, bill: 'att', received: true, receivedAt: at - 1 },
-        { id: 'analisa', name: 'Analisa', amount: 102, bill: 'att', received: true, receivedAt: at - 1 },
+        // They transfer the first week of the month -- not in the $4,029 yet.
+        { id: 'demaris', name: 'Demaris', amount: 31, bill: 'att', received: false },
+        { id: 'analisa', name: 'Analisa', amount: 102, bill: 'att', received: false },
       ],
       moved: null,
     },
