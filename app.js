@@ -818,32 +818,51 @@ function openBucket(id) {
     ${hist.length ? hist.map(t => `<div class="line small hist-row"><span>${D.niceDay(t.date)} · ${esc(t.note || { fill: 'Monthly savings', spend: 'Spent', add: 'Added', move: 'Moved', adjust: 'Balance corrected', start: 'Starting balance', cover: 'Covered overspending' }[t.kind] || '')}</span><span><span class="${t.amount < 0 ? 'neg' : ''}">${t.amount > 0 ? '+' : ''}${money(t.amount)}</span> <button class="x small" data-act="bk-tx-del" data-id="${esc(t.id)}" data-b="${esc(id)}" aria-label="Delete this entry">×</button></span></div>`).join('') : '<p class="muted small">Nothing yet.</p>'}`);
 }
 
-// Where money going into (or out of) savings lands. Positive: each bucket's
-// % (up to its goal) is filled in, and anything left over is hers to place.
+// Where money going into (or out of) savings lands. Positive: every bucket
+// starts filled in with its share (its % up to its goal), so Save is all it
+// takes -- change any amount, and place whatever's left from full buckets.
 // Negative: she picks which buckets cover it.
 function openAllocate(amount, done, note) {
-  const sp = amount > 0 ? Calc.splitIntoBuckets(H(), amount) : { add: {}, extra: round2(-amount), bal: Calc.bucketBalances(H()) };
-  S.alloc = { amount, auto: sp.add, toPlace: sp.extra, pick: {}, done, note };
+  const sp = amount > 0 ? Calc.splitIntoBuckets(H(), amount) : { add: {} };
+  S.alloc = { amount, auto: sp.add, amt: { ...sp.add }, done, note };
   S.sheet = 'alloc';
   openSheet(allocHtml());
+}
+function allocLeft() {
+  const A = S.alloc;
+  return round2(Math.abs(A.amount) - Object.values(A.amt).reduce((a, v) => a + (Number(v) || 0), 0));
+}
+// The pinned line at the top: what's still to place (updates as she types).
+function allocSumHtml() {
+  const A = S.alloc;
+  const out = A.amount < 0;
+  const left = allocLeft();
+  if (Math.abs(left) <= 0.004) return `<div class="alloc-sum ok"><b>${money(0)}</b> <span>${out ? 'All covered ✓' : 'All placed ✓'}</span></div>`;
+  if (left < 0) return `<div class="alloc-sum over"><b>Over by ${money(-left)}</b> <span>${out ? 'more than needed' : 'more than you moved'}</span></div>`;
+  return `<div class="alloc-sum left"><b>${money(left)}</b> <span>${out ? 'still to cover' : 'left to place'}</span>
+    ${!out ? `<div class="row gap wrap"><button class="btn ghost small" data-act="alloc-even">Split the rest evenly</button><select id="alloc-one" data-ch="alloc-one" aria-label="Put the rest in one bucket"><option value="">Rest to one bucket…</option>${(H().buckets || []).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></div>` : ''}</div>`;
+}
+function allocSaveLabel() {
+  const out = S.alloc.amount < 0;
+  const left = allocLeft();
+  return !out && left > 0.004 ? `Save (${money(left)} not assigned)` : !out && left < -0.004 ? `Save (${money(-left)} more than you moved)` : 'Save';
 }
 function allocHtml() {
   const A = S.alloc;
   const bal = Calc.bucketBalances(H());
-  const placed = round2(Object.values(A.pick).reduce((a, v) => a + (Number(v) || 0), 0));
-  const left = round2(A.toPlace - placed);
   const out = A.amount < 0;
-  return `<div class="sheet-head"><h2>${out ? `Cover ${money(-A.amount)}` : `Split ${money(A.amount)}`}</h2><button class="x" data-act="close">×</button></div>
-    <p class="small muted">${out ? 'Pick which buckets this comes out of.' : 'Each bucket gets its share until it’s full. Place whatever’s left however you like.'}</p>
+  const total = Math.abs(A.amount);
+  return `<div class="sheet-head alloc-head"><h2>${out ? `Cover ${money(total)}` : `Split ${money(total)}`}</h2><button class="x" data-act="close">×</button>
+      <div id="alloc-sum" class="alloc-pin">${allocSumHtml()}</div></div>
+    <p class="small muted">${out ? 'Pick which buckets this comes out of.' : 'Each bucket is filled in with its share. Tap Save, or change any amount first.'}</p>
     ${(H().buckets || []).map(b => {
       const auto = A.auto[b.id] || 0;
       const goal = Number(b.goal) || 0;
-      return `<div class="line alloc-line"><span><b>${esc(b.name)}</b> <span class="small muted">${money(bal[b.id])}${goal ? ` / ${money(goal)}` : ''}</span>${auto ? `<span class="small save-good"> +${money(auto)} ${b.monthly ? '(monthly)' : `(${b.pct}%)`}</span>` : ''}</span>
-        <input class="mini" data-ch="alloc" data-id="${esc(b.id)}" inputmode="decimal" placeholder="${out ? '−$' : '+$'}" value="${A.pick[b.id] || ''}"></div>`;
+      const hint = auto ? (b.monthly ? 'monthly' : `${b.pct}%`) : goal && bal[b.id] >= goal - 0.004 ? 'full' : '';
+      return `<div class="line alloc-line"><span><b>${b.emoji ? esc(b.emoji) + ' ' : ''}${esc(b.name)}</b> <span class="small muted">${money(bal[b.id])}${goal ? ` / ${money(goal)}` : ''}${hint ? ` · ${hint}` : ''}</span></span>
+        <input class="mini" data-ch="alloc" data-id="${esc(b.id)}" inputmode="decimal" placeholder="${out ? '−$' : '+$'}" value="${A.amt[b.id] ? A.amt[b.id] : ''}"></div>`;
     }).join('')}
-    ${A.toPlace > 0 ? `<div class="line total-line ${Math.abs(left) > 0.004 ? 'neg' : ''}"><span>${out ? 'Still to cover' : 'Left to place'}</span><b>${money(left)}</b></div>
-      ${!out ? `<div class="row gap wrap"><button class="btn ghost small" data-act="alloc-even">Split evenly</button><select id="alloc-one" data-ch="alloc-one" aria-label="Put it all in one bucket"><option value="">All to one bucket…</option>${(H().buckets || []).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></div>` : ''}` : ''}
-    <div class="row end sheet-foot"><button class="btn" data-act="alloc-save" ${Math.abs(left) > 0.004 && out ? 'disabled' : ''}>${Math.abs(left) > 0.004 && !out ? `Save (${money(left)} not assigned)` : 'Save'}</button></div>`;
+    <div class="row end sheet-foot"><button class="btn" id="alloc-save" data-act="alloc-save" ${out && Math.abs(allocLeft()) > 0.004 ? 'disabled' : ''}>${allocSaveLabel()}</button></div>`;
 }
 function redrawAlloc() { const y = $('#sheet').scrollTop; $('#sheet').innerHTML = allocHtml(); $('#sheet').scrollTop = y; }
 
@@ -1620,9 +1639,10 @@ const acts = {
     const A = S.alloc;
     const list = H().buckets || [];
     if (!list.length) return;
-    const each = Math.floor((A.toPlace / list.length) * 100) / 100;
-    A.pick = {};
-    list.forEach((b, i) => { A.pick[b.id] = i === list.length - 1 ? round2(A.toPlace - each * (list.length - 1)) : each; });
+    const rest = round2(Math.abs(A.amount) - Object.values(A.amt).reduce((a, v) => a + (Number(v) || 0), 0));
+    if (rest <= 0) return;
+    const each = Math.floor((rest / list.length) * 100) / 100;
+    list.forEach((b, i) => { A.amt[b.id] = round2((Number(A.amt[b.id]) || 0) + (i === list.length - 1 ? rest - each * (list.length - 1) : each)); });
     redrawAlloc();
   },
   'alloc-save': async () => {
@@ -1630,8 +1650,7 @@ const acts = {
     const out = A.amount < 0;
     const tx = [];
     const note = A.note ? { note: A.note } : {};
-    for (const id in A.auto) if (A.auto[id]) tx.push({ b: id, amount: A.auto[id], kind: 'fill', ...note });
-    for (const id in A.pick) { const v = Number(A.pick[id]) || 0; if (v) tx.push({ b: id, amount: out ? -Math.abs(v) : v, kind: out ? 'cover' : 'fill', ...note }); }
+    for (const id in A.amt) { const v = Number(A.amt[id]) || 0; if (v) tx.push({ b: id, amount: out ? -Math.abs(v) : Math.abs(v), kind: out ? 'cover' : 'fill', ...note }); }
     const done = A.done;
     S.alloc = null;
     closeSheet();
@@ -1915,8 +1934,14 @@ const changes = {
     rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
-  alloc: el => { S.alloc.pick[el.dataset.id] = num(el.value) || 0; redrawAlloc(); },
-  'alloc-one': el => { if (!el.value) return; S.alloc.pick = { [el.value]: S.alloc.toPlace }; redrawAlloc(); },
+  alloc: el => { S.alloc.amt[el.dataset.id] = Math.abs(num(el.value) || 0); redrawAlloc(); },
+  'alloc-one': el => {
+    if (!el.value) return;
+    const A = S.alloc;
+    const rest = round2(Math.abs(A.amount) - Object.values(A.amt).reduce((a, v) => a + (Number(v) || 0), 0));
+    if (rest > 0) A.amt[el.value] = round2((Number(A.amt[el.value]) || 0) + rest);
+    redrawAlloc();
+  },
   bk: async el => {
     const f = el.dataset.f;
     const v = ['goal', 'pct', 'monthly'].includes(f) ? (num(el.value) || 0) : el.value.trim();
@@ -1948,6 +1973,12 @@ document.addEventListener('change', e => {
 });
 // Live preview while dragging the see-through slider.
 document.addEventListener('input', e => {
+  if (e.target.matches('[data-ch="alloc"]') && S.alloc) {
+    S.alloc.amt[e.target.dataset.id] = Math.abs(num(e.target.value) || 0);
+    const sum = $('#alloc-sum'); if (sum) sum.innerHTML = allocSumHtml();
+    const btn = $('#alloc-save');
+    if (btn) { btn.textContent = allocSaveLabel(); btn.disabled = S.alloc.amount < 0 && Math.abs(allocLeft()) > 0.004; }
+  }
   if (e.target.id === 'mv-hysa') { const l = $('#hysa-left'); if (l) l.textContent = money(Number(e.target.dataset.actual) - Math.max(0, num(e.target.value) || 0)); }
   if (e.target.matches('[data-ch="glass"]')) document.documentElement.style.setProperty('--glass', e.target.value);
 });
