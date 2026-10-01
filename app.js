@@ -11,6 +11,7 @@ const S = {
   gotH: false, gotM: false, gotP: false,
   bdYm: null, bdTab: 'cat', year: null, open: {}, sinceOpen: false,
   draft: null, pending: false, openShares: {}, adding: null,
+  hideDone: (() => { try { return localStorage.getItem('ne-hide') === '1'; } catch (e) { return false; } })(),
   page: (() => { try { return localStorage.getItem('ne-page') === 'budgets' ? 'budgets' : 'overview'; } catch (e) { return 'overview'; } })(),
 };
 const $ = s => document.querySelector(s);
@@ -345,9 +346,9 @@ function billsSections() {
   </section>
 
   <section class="card">
-    <h2>Automatic payments</h2>
+    <div class="row between card-head"><h2>Automatic payments</h2>${eyeBtn()}</div>
     <p class="small muted">These check themselves off on their due date. Tap to change one if something’s off.</p>
-    ${c.bills.map(b => {
+    ${c.bills.filter(b => !(S.hideDone && b.paid)).map(b => {
       const hs = helpersBy[b.id] || [];
       const shareTotal = hs.reduce((s, h) => s + Number(h.amount || 0), 0);
       // Shared bill: what actually gets charged (our part + theirs), and a
@@ -363,6 +364,7 @@ function billsSections() {
         <b>${money(b.amountNow)}</b>
       </div>`;
     }).join('')}
+    ${doneNote(c.bills.filter(b => b.paid).length, 'paid')}
   </section>
 
   ${listCard('other', 'Other expenses this month', M.other || [], 'paid', 'Paid')}
@@ -371,17 +373,24 @@ function billsSections() {
     .map(([k, l]) => `<button class="linkish small add-link" data-act="li-open" data-kind="${k}">+ Add ${l}</button>`).join('')}`;
 }
 
+// The eye hides checked-off rows on Overview (one setting for every list).
+const EYE = '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 6.1A9.9 9.9 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-3.2 3.9M6.6 7.6C4 9.4 2.5 12 2.5 12S6 18 12 18a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+const eyeBtn = () => `<button class="eye" data-act="eye" aria-pressed="${S.hideDone}" aria-label="${S.hideDone ? 'Show checked items' : 'Hide checked items'}">${S.hideDone ? EYE_OFF : EYE}</button>`;
+const doneNote = (n, word) => (S.hideDone && n ? `<p class="small muted done-note">${n} ${word} hidden</p>` : '');
+
 function listCard(kind, title, items, flag, flagLabel) {
   const adding = S.adding === kind;
   if (!items.length && !adding) return '';
   return `<section class="card">
-    <h2>${title}</h2>
-    ${items.map(o => `<div class="check-row ${o[flag] ? 'done' : ''}">
+    <div class="row between card-head"><h2>${title}</h2>${eyeBtn()}</div>
+    ${items.filter(o => !(S.hideDone && o[flag])).map(o => `<div class="check-row ${o[flag] ? 'done' : ''}">
       <button class="box ${o[flag] ? 'on' : ''}" data-act="li-toggle" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="${flagLabel}">${o[flag] ? '✓' : ''}</button>
       <span class="grow"><button class="item-edit" data-act="li-edit" data-kind="${kind}" data-id="${esc(o.id)}" data-f="name" aria-label="Edit name">${esc(o.name)}</button></span>
       <button class="val-edit" data-act="li-edit" data-kind="${kind}" data-id="${esc(o.id)}" data-f="amount" aria-label="Edit amount">${money(o.amount)}</button>
       <button class="x small" data-act="li-del" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button>
     </div>`).join('')}
+    ${doneNote(items.filter(o => o[flag]).length, kind === 'back' ? 'received' : 'paid')}
     ${adding ? `<div class="add-row"><input id="add-${kind}-name" placeholder="${kind === 'back' ? 'What’s coming in' : 'What is it'}"><input id="add-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="li-add" data-kind="${kind}">Add</button></div>
       <button class="linkish small" data-act="li-open" data-kind="">Cancel</button>`
       : `<button class="linkish small add-link" data-act="li-open" data-kind="${kind}">+ Add</button>`}
@@ -544,6 +553,23 @@ function nextSetupYm() {
 
 /* ---------- Breakdown ---------- */
 
+// Direction + amount for any money going between checking and savings. Starts
+// at the app's number; type over it with what you actually moved.
+function moveForm(key, excess) {
+  const dir = excess < 0 ? 'out' : 'in';
+  return `<div class="move-form" data-key="${key}" data-dir="${dir}">
+    <div class="seg">${[['in', 'Into savings'], ['out', 'From savings']].map(([k, l]) => `<button type="button" class="${dir === k ? 'on' : ''}" data-act="mdir" data-v="${k}">${l}</button>`).join('')}</div>
+    <label class="amount move-amt"><span>$</span><input id="mv-${key}" inputmode="decimal" value="${Math.abs(round2(excess))}" aria-label="Amount"></label>
+  </div>`;
+}
+// Signed amount from a move form: + into savings, − out of savings.
+function readMove(key) {
+  const box = view.querySelector(`.move-form[data-key="${key}"]`);
+  const v = num($(`#mv-${key}`).value);
+  if (v === null) return null;
+  return box.dataset.dir === 'out' ? -Math.abs(v) : Math.abs(v);
+}
+
 // End of month: move this month's Savings/Excess into (or out of) savings.
 function moveCard() {
   const ym = homeYm();
@@ -552,10 +578,9 @@ function moveCard() {
   const c = Calc.checklist(H(), M, ym, S.purchases);
   return `<section class="card move-card">
     <div class="line"><span><b>${D.name(ym)} Savings/Excess</b></span><b>${money(c.excess)}</b></div>
-    <p class="small muted">${c.excess >= 0 ? 'Move it over when you set up next month.' : 'Spending went past the plan — cover it from savings when you set up next month.'}</p>
-    ${c.excess >= 0
-      ? `<button class="btn full" data-act="move" data-v="${c.excess}">Move ${money(c.excess)} to savings</button>`
-      : `<button class="btn full ghost" data-act="move" data-v="${c.excess}">Take ${money(-c.excess)} from savings</button>`}
+    <p class="small muted">${c.excess >= 0 ? 'Move it over when you set up next month.' : 'Spending went past the plan — cover it from savings when you set up next month.'} Change the amount to what you actually moved.</p>
+    ${moveForm('rev', c.excess)}
+    <button class="btn full" data-act="move">Save transfer</button>
   </section>`;
 }
 
@@ -573,8 +598,9 @@ function hysaCard() {
   const extra = round2(actual - floor);
   return `<section class="card move-card hysa-card">
     <div class="line"><span><b>Year-end: transfer to HYSA</b></span><b>${extra > 0 ? money(extra) : '—'}</b></div>
-    <p class="small muted">${extra > 0 ? `Savings is ${money(actual)} — ${money(extra)} above your ${money(floor)} floor. Move that to the HYSA, then tap below.` : `Savings is at or under your ${money(floor)} floor, so nothing moves this year.`}</p>
-    <button class="btn full" data-act="hysa" data-v="${Math.max(0, extra)}" data-y="${Y}">Reset savings to ${money(floor)} and review ${Y + 1}</button>
+    <p class="small muted">${extra > 0 ? `Savings is ${money(actual)} — ${money(extra)} above your ${money(floor)} floor. Move that to the HYSA (or type what you actually moved), then tap below.` : `Savings is at or under your ${money(floor)} floor. Type an amount if you moved anything anyway.`}</p>
+    <label class="amount move-amt"><span>$</span><input id="mv-hysa" inputmode="decimal" value="${Math.max(0, extra)}" data-actual="${actual}" data-y="${Y}" aria-label="Amount moved to HYSA"></label>
+    <button class="btn full" data-act="hysa" data-y="${Y}">Reset savings to <span id="hysa-left">${money(actual - Math.max(0, extra))}</span> and review ${Y + 1}</button>
   </section>`;
 }
 
@@ -685,9 +711,12 @@ function startDraft() {
   S.draft = d;
 }
 
+// Left blank in setup = use the app's current checking estimate.
+function estChecking() { const cur = homeYm(); return Calc.checklist(H(), S.months[cur], cur, S.purchases).est; }
+
 function draftMonth(d) {
   return {
-    setup: true, budgets: d.budgets, checking: { amount: num(d.checking) || 0, at: Date.now() }, bills: {},
+    setup: true, budgets: d.budgets, checking: { amount: num(d.checking) !== null ? num(d.checking) : estChecking(), at: Date.now() }, bills: {},
     other: d.other, back: d.back, held: d.held, moved: null,
   };
 }
@@ -759,8 +788,8 @@ function viewSetup() {
       ${line('−', 'Budgets', c.budgetsLeft)}
       <div class="line total-line ${c.excess < 0 ? 'neg' : ''}"><span>Savings/Excess</span><b>${money(c.excess)}</b></div>
       <div class="stack">
-        ${c.excess > 0 ? `<button class="btn full" data-act="d-finish" data-mode="move">Finish & move ${money(c.excess)} to savings</button>` : ''}
-        ${c.excess < 0 ? `<button class="btn full" data-act="d-finish" data-mode="move">Finish & take ${money(-c.excess)} from savings</button>` : ''}
+        ${c.excess ? `<p class="small muted">Moving money now? Change the amount to what you actually transfer.</p>${moveForm('setup', c.excess)}
+        <button class="btn full" data-act="d-finish" data-mode="move">Finish & save transfer</button>` : ''}
         <button class="btn ghost full" data-act="d-finish" data-mode="none">Finish${c.excess ? ' — I’ll move money later' : ''}</button>
       </div>`;
   }
@@ -777,7 +806,11 @@ async function finishSetup(mode) {
   const M = draftMonth(d);
   const c = Calc.checklist(H(), M, N, S.purchases);
   M.setupAt = Date.now();
-  if (mode === 'move' && c.excess) M.moved = c.excess;
+  if (mode === 'move') {
+    const v = readMove('setup');
+    if (!v) { toast('Type the amount you moved'); return; }
+    M.moved = v;
+  }
   const R = D.addMonths(N, -1);
   const plans = H().plans || {};
   const actual = Number((H().savings || {}).actual) || 0;
@@ -792,7 +825,7 @@ async function finishSetup(mode) {
   S.draft = null;
   location.hash = '#/home';
   if (M.moved > 0) confetti();
-  toast(`${D.name(N)} is set up${M.moved > 0 ? ` · ${money(M.moved)} to savings` : ''}`);
+  toast(`${D.name(N)} is set up${M.moved > 0 ? ` · ${money(M.moved)} to savings` : M.moved < 0 ? ` · ${money(-M.moved)} from savings` : ''}`);
 }
 
 /* ---------- Settings ---------- */
@@ -966,6 +999,7 @@ const acts = {
   },
 
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
+  eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
   page: el => { S.page = el.dataset.v; try { localStorage.setItem('ne-page', S.page); } catch (e) {} window.scrollTo(0, 0); render(); },
   bill: async el => {
     const ym = homeYm();
@@ -1028,9 +1062,15 @@ const acts = {
     await B.setMonth(homeYm(), { checking: { amount: v, at: Date.now() } });
     toast('Checking updated');
   },
-  move: async el => {
-    const v = Number(el.dataset.v);
-    const ok = await ask(v >= 0 ? `Move ${money(v)} from checking to savings?` : `Take ${money(-v)} from savings to cover this month?`, v >= 0 ? 'Moved it' : 'Took it');
+  mdir: el => {
+    const box = el.closest('.move-form');
+    box.dataset.dir = el.dataset.v;
+    box.querySelectorAll('[data-act="mdir"]').forEach(b => b.classList.toggle('on', b === el));
+  },
+  move: async () => {
+    const v = readMove('rev');
+    if (!v) { toast('Type the amount you moved'); return; }
+    const ok = await ask(v >= 0 ? `Moved ${money(v)} from checking to savings?` : `Took ${money(-v)} from savings into checking?`, 'Yes');
     if (!ok) return;
     const ym = homeYm();
     await B.setMonth(ym, { moved: v });
@@ -1087,14 +1127,15 @@ const acts = {
   },
 
   hysa: async el => {
-    const v = Number(el.dataset.v);
+    const v = Math.max(0, num($('#mv-hysa').value) || 0);
     const Y = el.dataset.y;
     const sv = H().savings;
     const floor = Number(sv.floor) || 5000;
-    const q = v > 0 ? `Moved ${money(v)} to the HYSA? Savings will be set to ${money(floor)}.` : `Close out ${Y} and look at ${Number(Y) + 1}?`;
+    const left = round2((Number(sv.actual) || 0) - v);
+    const q = v > 0 ? `Moved ${money(v)} to the HYSA? Savings will be set to ${money(left)}.` : `Close out ${Y} and look at ${Number(Y) + 1}?`;
     if (!(await ask(q, v > 0 ? 'Yes, reset' : 'Yes'))) return;
     await B.setH([[['savings', 'hysa'], round2((Number(sv.hysa) || 0) + v)], [['savings', 'hysaDone', Y], v || 0.01]]);
-    if (v > 0) await setSavings(floor, `Year-end move to HYSA (${Y})`, 'hysa');
+    if (v > 0) await setSavings(left, `Year-end move to HYSA (${Y})`, 'hysa');
     S.year = Number(Y) + 1;
     location.hash = '#/year';
     if (v > 0) { confetti(); toast(`${money(v)} to the HYSA 🎉 Here’s ${Number(Y) + 1}.`); }
@@ -1276,6 +1317,7 @@ document.addEventListener('change', e => {
 });
 // Live preview while dragging the see-through slider.
 document.addEventListener('input', e => {
+  if (e.target.id === 'mv-hysa') { const l = $('#hysa-left'); if (l) l.textContent = money(Number(e.target.dataset.actual) - Math.max(0, num(e.target.value) || 0)); }
   if (e.target.matches('[data-ch="glass"]')) document.documentElement.style.setProperty('--glass', e.target.value);
 });
 document.addEventListener('keydown', e => {
