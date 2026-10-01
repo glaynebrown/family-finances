@@ -83,7 +83,7 @@ function seedHousehold(uid, name) {
       { id: 'twins', name: 'Twins', budget: 200, emoji: '👶' },
     ],
     stores: ['Aldi', 'Costco', 'Target', 'Publix', 'Amazon', 'Walmart'],
-    tags: ['Diapers', 'Wipes', 'Eating out', 'Meal boxes', 'Snacks', 'Millie Moon'],
+    tags: ['Diapers', 'Wipes', 'Eating out', 'Meal boxes', 'Snacks', 'Millie Moon', 'Medical'],
     bills: [
       { id: 'rent', name: 'Rent - Demaris', amount: 1700, day: 1, changes: [] },
       { id: 'hca', name: 'HCA payment', amount: 75, day: 1, changes: [] },
@@ -119,6 +119,18 @@ function seedHousehold(uid, name) {
       },
     },
     usual: { nick: 4750, bella: 700 },
+    // Spending: 'log' (log as you go) or 'import' (weekly bank file).
+    trackMode: 'log',
+    imports: {},
+    // Merchant rules for imports, keyed by Imp.keyOf(description).
+    rules: {
+      'henrico doctors hospital': { action: 'skip', note: 'HCA payment', name: "Henrico Doctors' Hospital" },
+      dashpass: { action: 'skip', note: 'canceled', name: 'DashPass' },
+      nintendo: { action: 'cat', cat: 'activities', name: 'Nintendo' },
+      'hobby lobby': { action: 'cat', cat: 'home', name: 'Hobby Lobby' },
+      'mail and more': { action: 'cat', cat: 'activities', name: 'Mail And More' },
+      'healthy minds ther': { action: 'ask', tags: ['Medical'], name: 'Healthy Minds Therapy' },
+    },
     look: { heading: 'Oswald', body: 'Nunito', colors: { ...Looks.colors }, glass: 0.82, calm: true },
   };
   const months = {
@@ -217,13 +229,24 @@ const Calc = (() => {
     const at = snap.at || 0;
     let est = Number(snap.amount) || 0;
     const since = [];
+    // Bills still to come count only OUR part. A shared bill (AT&T) actually
+    // charges our part + theirs, so their transfers only matter when the timing
+    // doesn't line up: sent but the bill hasn't posted (their money is sitting in
+    // checking -> held), or the bill posted but they haven't sent it (-> owed).
     let billsLeft = 0;
+    let heldBack = 0;
+    let owed = 0;
     const bills = (H.bills || []).map(b => {
       const st = billStatus(M, b, ym, now);
       const charge = billCharge(M, b, ym);
+      const ours = billAmount(b, ym);
       if (st.paid && st.at > at) { est -= charge; since.push({ what: b.name, amount: -charge }); }
-      if (!st.paid) billsLeft += charge;
-      return { ...b, ...st, amountNow: billAmount(b, ym), charge };
+      if (!st.paid) billsLeft += ours;
+      for (const h of heldFor(M, b.id)) {
+        if (!st.paid && h.received) heldBack += Number(h.amount) || 0;
+        if (st.paid && !h.received) owed += Number(h.amount) || 0;
+      }
+      return { ...b, ...st, amountNow: ours, charge };
     });
     let otherLeft = 0;
     for (const o of M.other || []) {
@@ -235,10 +258,8 @@ const Calc = (() => {
       if (b.received && (b.receivedAt || 0) > at) { est += Number(b.amount) || 0; since.push({ what: b.name, amount: +b.amount }); }
       if (!b.received) backIn += Number(b.amount) || 0;
     }
-    let helpIn = 0;
     for (const h of M.held || []) {
       if (h.received && (h.receivedAt || 0) > at) { est += Number(h.amount) || 0; since.push({ what: `From ${h.name}`, amount: +h.amount }); }
-      if (!h.received) helpIn += Number(h.amount) || 0;
     }
     let purchased = 0;
     for (const p of purchases) if ((p.t || 0) > at) purchased += Number(p.amount) || 0;
@@ -254,10 +275,10 @@ const Calc = (() => {
       return { ...c, budget, used, left: round2(budget - used), over: used > budget + 0.004 };
     });
     // Purchases in a category that no longer exists still count as spending.
-    const excess = round2(est + backIn + helpIn - billsLeft - otherLeft - budgetsLeft);
+    const excess = round2(est + backIn + owed - heldBack - billsLeft - otherLeft - budgetsLeft);
     return {
       checking: round2(snap.amount), checkedAt: at, est: round2(est), since,
-      backIn: round2(backIn), helpIn: round2(helpIn), billsLeft: round2(billsLeft),
+      backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), billsLeft: round2(billsLeft),
       otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s,
     };
   }

@@ -362,7 +362,8 @@ function billsSections() {
     ${c.since.length ? `<button class="linkish small" data-act="since">${S.sinceOpen ? 'Hide' : 'What changed since then?'}</button>
       ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}</div>` : ''}` : ''}
     ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
-    ${c.helpIn ? line('+', 'Shared payments not in yet', c.helpIn) : ''}
+    ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
+    ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
     ${line('−', 'Bills still to come', c.billsLeft)}
     ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
     ${line('−', 'Budget left to spend', c.budgetsLeft)}
@@ -928,7 +929,8 @@ function viewSetup() {
     body = `<h2>Savings/Excess</h2>
       <div class="line"><span>Checking</span><b>${money(c.est)}</b></div>
       ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
-      ${c.helpIn ? line('+', 'Shared payments not in yet', c.helpIn) : ''}
+      ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
+    ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
       ${line('−', `${D.name(N)} bills still to come`, c.billsLeft)}
       ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
       ${line('−', 'Budgets', c.budgetsLeft)}
