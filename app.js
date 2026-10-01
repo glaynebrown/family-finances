@@ -392,7 +392,7 @@ function billsSections() {
         <button class="box ${b.paid ? 'on' : ''}" data-act="bill" data-id="${esc(b.id)}" aria-label="Paid">${b.paid ? '✓' : ''}</button>
         <span class="day">${D.ordinal(b.day)}</span>
         <span class="grow">${esc(b.name)} ${extra}${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
-        <b>${money(b.amountNow)}</b>
+        <span class="bill-amt">${Math.abs(b.amountNow - b.normal) > 0.004 ? `<span class="small muted">normally ${money(b.normal)}</span>` : ''}<button class="val-edit" data-act="bill-amt" data-id="${esc(b.id)}" aria-label="Change this month's amount">${money(b.amountNow)}</button></span>
       </div>`;
     }).join('')}
     ${doneNote(c.bills.filter(b => b.paid).length, 'paid')}
@@ -546,7 +546,7 @@ function openPlan(ym) {
   S.plan = { ym, other: (p.other || []).map(o => ({ ...o })) };
   const auto = (() => {
     const M = S.months[ym];
-    return (H().bills || []).reduce((s, b) => s + Calc.billAmount(b, ym), 0) + (H().categories || []).reduce((s, c) => s + Calc.budgetFor(H(), M, c, ym), 0);
+    return (H().bills || []).reduce((s, b) => s + Calc.billAmount(b, ym, M), 0) + (H().categories || []).reduce((s, c) => s + Calc.budgetFor(H(), M, c, ym), 0);
   })();
   const v = x => (x === undefined || x === null ? '' : x);
   S.sheet = 'plan';
@@ -988,6 +988,19 @@ async function saveImport() {
     if (r.remember && !r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits) rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
   }
   if (purchases.length) await B.savePurchases(purchases);
+  // Bills that came through at a different amount: use the real charge for that month.
+  const billHits = {};
+  for (const r of I.rows) {
+    if (r.status === 'dup' || !r.billId) continue;
+    const k = `${D.ymOf(r.date)}|${r.billId}`;
+    billHits[k] = round2((billHits[k] || 0) + (Number(r.charged) || 0));
+  }
+  for (const k in billHits) {
+    const [ym, id] = k.split('|');
+    const b = (H().bills || []).find(x => x.id === id);
+    if (!b) continue;
+    if (Math.abs(billHits[k] - Calc.billNormal(b, ym)) > 0.004) await B.setMonthField(ym, ['billAmt', id], billHits[k]);
+  }
   // Each paycheck checks off the next one expected that month, with its real
   // amount (overtime and all); if they've all arrived, it's added to the list.
   const byMonth = {};
@@ -1688,6 +1701,16 @@ const acts = {
     inp.focus();
     inp.select();
   },
+  // Tap a bill's amount on Overview: change it for this month only.
+  'bill-amt': el => {
+    const ym = homeYm();
+    const b = H().bills.find(x => x.id === el.dataset.id);
+    const cur = Calc.billAmount(b, ym, S.months[ym]);
+    el.outerHTML = `<input class="val-in" data-ch="billamt" data-id="${esc(b.id)}" inputmode="decimal" value="${cur}" aria-label="${esc(b.name)} this month">`;
+    const inp = view.querySelector(`.val-in[data-ch="billamt"][data-id="${b.id}"]`);
+    inp.focus();
+    inp.select();
+  },
   'budget-edit': el => {
     const cat = el.dataset.cat;
     const ym = homeYm();
@@ -1901,6 +1924,15 @@ const changes = {
     const v = f === 'amount' ? num(el.value) : el.value.trim();
     if (v === null || v === '') { render(); return; }
     await monthList(kind, arr => arr.map(o => (o.id === id ? { ...o, [f]: v } : o)));
+  },
+  billamt: async el => {
+    const ym = homeYm();
+    const b = H().bills.find(x => x.id === el.dataset.id);
+    const v = num(el.value);
+    if (v === null) { render(); return; }
+    const normal = Calc.billNormal(b, ym);
+    await B.setMonthField(ym, ['billAmt', b.id], Math.abs(v - normal) < 0.005 ? B.DEL : v);
+    toast(`${b.name}: ${money(v)} for ${D.name(ym)}${Math.abs(v - normal) < 0.005 ? '' : ` (normally ${money(normal)})`}`);
   },
   catbudget: async el => {
     const v = num(el.value);

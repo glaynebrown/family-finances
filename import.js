@@ -149,8 +149,8 @@ const Imp = (() => {
       const bill = isBuy && billFor(H, rec);
       if (bill && !(rule && rule.action === 'cat')) {
         const amt = Calc.billAmount(bill, D.ymOf(rec.date));
-        row.status = 'skip'; row.cat = 'skip';
-        row.reason = `Matches your ${bill.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)}, bill says ${money(amt)}` : ''}`;
+        row.status = 'skip'; row.cat = 'skip'; row.billId = bill.id; row.charged = rec.amount;
+        row.reason = `Matches your ${bill.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)} (bill said ${money(amt)}); this month’s amount will be updated` : ''}`;
         return row;
       }
       if (rule && rule.action === 'ask') { row.ask = true; row.tags = [...(rule.tags || [])]; row.reason = 'You pick the category each time'; return row; }

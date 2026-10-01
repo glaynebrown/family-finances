@@ -115,17 +115,24 @@ const Calc = (() => {
   // setting are Nick + Bella.
   const earners = H => (H.earners && H.earners.length ? H.earners : [{ id: 'nick', name: 'Nick' }, { id: 'bella', name: 'Bella' }]);
 
-  const billAmount = (bill, ym) => {
+  // The bill's normal amount for a month (with scheduled changes)...
+  const billNormal = (bill, ym) => {
     let amt = Number(bill.amount) || 0;
     const ch = (bill.changes || []).filter(c => c.from <= ym).sort((a, b) => (a.from < b.from ? -1 : 1));
     if (ch.length) amt = Number(ch[ch.length - 1].amount) || 0;
     return amt;
   };
+  // ...unless that month has its own amount (changed on Overview, or the real
+  // charge from an import) -- for bills that vary month to month.
+  const billAmount = (bill, ym, M) => {
+    const o = M && M.billAmt && M.billAmt[bill.id];
+    return o !== undefined && o !== null ? Number(o) || 0 : billNormal(bill, ym);
+  };
 
   // Family help riding along with a bill that month.
   const heldFor = (M, billId) => ((M && M.held) || []).filter(h => h.bill === billId);
   // What actually leaves checking when the bill posts: our part plus theirs.
-  const billCharge = (M, bill, ym) => billAmount(bill, ym) + heldFor(M, bill.id).reduce((s, h) => s + (Number(h.amount) || 0), 0);
+  const billCharge = (M, bill, ym) => billAmount(bill, ym, M) + heldFor(M, bill.id).reduce((s, h) => s + (Number(h.amount) || 0), 0);
 
   // Paid? Automatic by due date, unless someone checked/unchecked it by hand.
   function billStatus(M, bill, ym, now = Date.now()) {
@@ -201,14 +208,14 @@ const Calc = (() => {
     const bills = (H.bills || []).map(b => {
       const st = billStatus(M, b, ym, now);
       const charge = billCharge(M, b, ym);
-      const ours = billAmount(b, ym);
+      const ours = billAmount(b, ym, M);
       if (st.paid && st.at > at) { est -= charge; since.push({ what: b.name, amount: -charge }); }
       if (!st.paid) billsLeft += ours;
       for (const h of heldFor(M, b.id)) {
         if (!st.paid && h.received) heldBack += Number(h.amount) || 0;
         if (st.paid && !h.received) owed += Number(h.amount) || 0;
       }
-      return { ...b, ...st, amountNow: ours, charge };
+      return { ...b, ...st, amountNow: ours, normal: billNormal(b, ym), charge };
     });
     let otherLeft = 0;
     for (const o of M.other || []) {
@@ -284,7 +291,7 @@ const Calc = (() => {
     };
     const defaultExpenses = ym => {
       const M = months[ym];
-      const bills = (H.bills || []).reduce((s, b) => s + billAmount(b, ym), 0);
+      const bills = (H.bills || []).reduce((s, b) => s + billAmount(b, ym, M), 0);
       const cats = (H.categories || []).reduce((s, c) => s + budgetFor(H, M, c, ym), 0);
       return bills + cats;
     };
@@ -375,5 +382,5 @@ const Calc = (() => {
     return { add, extra: round2(left), bal };
   }
 
-  return { earners, bucketBalances, splitIntoBuckets, billAmount, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
+  return { earners, bucketBalances, splitIntoBuckets, billAmount, billNormal, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
 })();
