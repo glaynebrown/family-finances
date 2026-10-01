@@ -213,19 +213,15 @@ window.addEventListener('hashchange', () => {
 
 function catCard(c) {
   const pct = c.budget > 0 ? Math.min(100, (c.used / c.budget) * 100) : (c.used > 0 ? 100 : 0);
-  const normal = Number((catById(c.id) || {}).budget) || 0;
-  const trimmed = c.budget !== normal ? `<span class="muted small"> · ${c.budget < normal ? 'trimmed' : 'raised'} from ${money(normal)}</span>` : '';
   // Tapping the amount left changes this month's budget for the category;
-  // tapping anywhere else on the card logs a purchase.
+  // tapping anywhere else on the card logs a purchase (or lists them, in import mode).
   const right = c.over
     ? `<button class="val-edit over-txt" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</button>`
     : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
-  // Log mode: tap a card to log a purchase in it. Import mode: tap to see what's in it.
   const tapAct = H().trackMode === 'import' ? 'cat-list' : 'log';
   return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="${tapAct}" data-cat="${esc(c.id)}">
-    <div class="row between"><span class="cat-name"><span class="emoji">${esc(c.emoji || '•')}</span>${esc(c.name)}</span><span>${right}</span></div>
+    <div class="row between"><span class="cat-name"><span class="emoji">${esc(c.emoji || '•')}</span>${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
-    <div class="small muted">${money(c.used)} of ${money(c.budget)}${trimmed}${c.over ? (calm() ? ' · flagged for review' : '') : ''}</div>
   </div>`;
 }
 
@@ -531,7 +527,7 @@ function openPlan(ym) {
   S.plan = { ym, other: (p.other || []).map(o => ({ ...o })) };
   const auto = (() => {
     const M = S.months[ym];
-    return (H().bills || []).reduce((s, b) => s + Calc.billAmount(b, ym), 0) + (H().categories || []).reduce((s, c) => s + Calc.budgetFor(H(), M, c), 0);
+    return (H().bills || []).reduce((s, b) => s + Calc.billAmount(b, ym), 0) + (H().categories || []).reduce((s, c) => s + Calc.budgetFor(H(), M, c, ym), 0);
   })();
   const v = x => (x === undefined || x === null ? '' : x);
   S.sheet = 'plan';
@@ -542,6 +538,10 @@ function openPlan(ym) {
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
     <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
       <div class="add-row"><input id="p-oname" placeholder="What"><input id="p-oamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-oadd">Add</button></div></div>
+    ${S.months[ym] && S.months[ym].setup
+      ? `<p class="small muted">${D.name(ym)} is already set up — change its budgets on the Budgets page.</p>`
+      : `<div class="field"><span class="label">Budgets for ${D.name(ym)} <span class="muted small">(starts from your normal amounts; used when you set up the month)</span></span>
+        ${H().categories.map(c => { const pb = (p.budgets || {})[c.id]; return `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="p-b-${esc(c.id)}" inputmode="decimal" value="${pb !== undefined && pb !== null ? pb : c.budget}"></div>`; }).join('')}</div>`}
     <label class="field"><span class="label">Savings this month <span class="muted small">(leave blank to figure it automatically${y && y.kind === 'auto' ? `: ${money(y.savings)}` : ''})</span></span><input id="p-sav" inputmode="decimal" value="${v(p.savings)}"></label>
     <label class="field"><span class="label">Note</span><input id="p-note" value="${esc(p.note || '')}"></label>
     <div class="row end sheet-foot"><button class="btn" data-act="p-save">Save</button></div>`);
@@ -557,6 +557,16 @@ async function savePlan() {
     nick: val('#p-nick'), bella: val('#p-bella'), elevate: val('#p-elevate'),
     elevateToSavings: true, expenses: val('#p-exp'), savings: val('#p-sav'),
     other: S.plan.other, note: $('#p-note').value.trim(),
+    budgets: (() => {
+      const out = {};
+      for (const c of H().categories) {
+        const el = $(`#p-b-${c.id}`);
+        if (!el) continue;
+        const v = num(el.value);
+        if (v !== null && v !== (Number(c.budget) || 0)) out[c.id] = v;
+      }
+      return Object.keys(out).length ? out : (S.months[ym] && S.months[ym].setup ? old.budgets || null : null);
+    })(),
   };
   for (const k of Object.keys(p)) if (p[k] === null) delete p[k];
   closeSheet();
@@ -857,7 +867,7 @@ function startDraft() {
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
   }
-  for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Number(c.budget) || 0;
+  for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Calc.budgetFor(H(), null, c, N);
   d.nick = plan.nick ?? '';
   d.bella = plan.bella ?? '';
   S.draft = d;
@@ -1291,6 +1301,15 @@ const acts = {
     inp.focus();
     inp.select();
   },
+  'budget-edit': el => {
+    const cat = el.dataset.cat;
+    const ym = homeYm();
+    const c = Calc.checklist(H(), S.months[ym], ym, S.purchases).cats.find(x => x.id === cat);
+    el.outerHTML = `<input class="val-in" data-ch="catbudget" data-cat="${esc(cat)}" inputmode="decimal" value="${c.budget}" placeholder="$" aria-label="${esc(c.name)} budget this month">`;
+    const inp = view.querySelector(`.val-in[data-ch="catbudget"][data-cat="${cat}"]`);
+    inp.focus();
+    inp.select();
+  },
   inc: el => {
     const { ym, k } = el.dataset;
     const cur = ((H().plans || {})[ym] || {})[k];
@@ -1490,6 +1509,14 @@ const changes = {
     const v = f === 'amount' ? num(el.value) : el.value.trim();
     if (v === null || v === '') { render(); return; }
     await monthList(kind, arr => arr.map(o => (o.id === id ? { ...o, [f]: v } : o)));
+  },
+  catbudget: async el => {
+    const v = num(el.value);
+    const ym = homeYm();
+    const c = Calc.checklist(H(), S.months[ym], ym, S.purchases).cats.find(x => x.id === el.dataset.cat);
+    if (v === null || v === c.budget) { render(); return; }
+    await B.setMonth(ym, { budgets: { [c.id]: v } });
+    toast(`${c.name}: ${D.name(ym)} budget ${money(v)} (${v > c.budget ? '+' : '−'}${money(Math.abs(v - c.budget))})`);
   },
   left: async el => {
     const v = num(el.value);

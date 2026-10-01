@@ -212,9 +212,14 @@ const Calc = (() => {
     return r;
   }
 
-  const budgetFor = (H, M, cat) => {
+  // A month's budget for a category: what's saved for that month, else what was
+  // planned for it on the Year tab, else the normal amount from Settings.
+  const budgetFor = (H, M, cat, ym) => {
     const b = M && M.budgets && M.budgets[cat.id];
-    return b === undefined || b === null ? Number(cat.budget) || 0 : Number(b) || 0;
+    if (b !== undefined && b !== null) return Number(b) || 0;
+    const p = ym && ((H.plans || {})[ym] || {}).budgets;
+    if (p && p[cat.id] !== undefined && p[cat.id] !== null) return Number(p[cat.id]) || 0;
+    return Number(cat.budget) || 0;
   };
 
   // The checklist math from the sheet, kept live:
@@ -269,7 +274,7 @@ const Calc = (() => {
     const s = spent(purchases, ym);
     let budgetsLeft = 0;
     const cats = (H.categories || []).map(c => {
-      const budget = budgetFor(H, M, c);
+      const budget = budgetFor(H, M, c, ym);
       const used = s.cat[c.id] || 0;
       budgetsLeft += Math.max(0, budget - used);
       return { ...c, budget, used, left: round2(budget - used), over: used > budget + 0.004 };
@@ -316,7 +321,7 @@ const Calc = (() => {
     const defaultExpenses = ym => {
       const M = months[ym];
       const bills = (H.bills || []).reduce((s, b) => s + billAmount(b, ym), 0);
-      const cats = (H.categories || []).reduce((s, c) => s + budgetFor(H, M, c), 0);
+      const cats = (H.categories || []).reduce((s, c) => s + budgetFor(H, M, c, ym), 0);
       return bills + cats;
     };
     const rows = [];

@@ -365,3 +365,20 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .eye:hover, .eye[aria-pressed="true"] { opacity: 1; }
 .eye svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .done-note { margin: 6px 0 2px; }
+/* Import review */
+.imp-row { background: var(--card); border-radius: 14px; padding: 10px 12px; margin: 0 0 8px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.imp-row.needs { box-shadow: inset 3px 0 0 var(--accent); }
+.imp-row.skipped { opacity: .65; }
+.imp-ctl { display: flex; gap: 6px; margin-top: 8px; }
+.imp-ctl select { flex: 1; min-width: 0; padding: 8px 10px; }
+.imp-ctl select[data-ch="imp-tag"] { flex: 0 0 96px; }
+.splits { margin-top: 6px; }
+.splits select { flex: 1; }
+.remember { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); }
+.remember input { width: 18px; height: 18px; }
+.import-save { position: sticky; bottom: calc(env(safe-area-inset-bottom) + 72px); background: linear-gradient(transparent, var(--bg) 30%); padding-top: 18px; }
+.uncat-card { border-left: 5px solid var(--over); }
+.splits .split-tag { flex: 0 0 82px; width: 82px; padding: 8px 6px; }
+.cat .bar { margin-bottom: 2px; }
+.cat .of { white-space: nowrap; }
+.val-edit.small-edit { font-weight: 600; font-size: inherit; color: inherit; }
