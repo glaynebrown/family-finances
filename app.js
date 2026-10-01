@@ -424,7 +424,10 @@ function viewYear() {
 
   const rows = y.rows;
   const early = rows.filter(r => r.past && !r.hasData);
-  const cards = rows.filter(r => !(r.past && !r.hasData)).map(yearCard).join('');
+  const shown = rows.filter(r => !(r.past && !r.hasData));
+  const cards = shown.map(yearCard).join('');
+  const isOpen = r => (S.open[r.ym] !== undefined ? S.open[r.ym] : !r.past);
+  const allOpen = shown.length && shown.every(isOpen);
   return `
   <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
   <section class="card">
@@ -436,8 +439,9 @@ function viewYear() {
     ${Number(sv.hysa) ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
   </section>
   ${hysaCard}
-  <h2 class="year-head">Projected Savings</h2>
-  ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : `${D.short(early[0].ym)}–${D.short(early[early.length - 1].ym)} were before the app.`}</p>` : ''}
+  <div class="year-head-row"><h2 class="year-head">Projected Savings</h2>
+  ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${shown.map(r => r.ym).join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
+  ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : 'Prior data kept in Google Sheets'}</p>` : ''}
   <div class="months">${cards}</div>
   ${early.length === 12 ? `<button class="btn ghost full" data-act="plan" data-ym="${Y}-01">Plan January ${Y}</button>` : ''}`;
 }
@@ -993,6 +997,7 @@ const acts = {
   },
 
   yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
+  'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
   plan: el => openPlan(el.dataset.ym),
   left: el => {
