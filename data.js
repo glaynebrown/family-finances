@@ -66,101 +66,55 @@ const Looks = {
   bodies: ['Nunito', 'DM Sans', 'Lato', 'Quicksand', 'Poppins', 'Source Sans 3'],
 };
 
-// What the app starts with: the October checklist, the bills, the year plan
-// (Aug-Dec from the 2026 tab) and the category budgets.
+// A brand-new household starts blank (a few starter categories, no bills, no
+// numbers). Anything personal comes from a setup file the person loads, so no
+// one's finances live in this public code.
 function seedHousehold(uid, name) {
-  const at = new Date(2026, 8, 30, 15, 0).getTime(); // when the $4,029 balance was checked
   const household = {
     members: { [uid]: true },
     people: { [uid]: { name } },
     joinCode: '',
     created: Date.now(),
+    earners: [{ id: 'p1', name }],
     categories: [
-      { id: 'food', name: 'Food', budget: 1000, emoji: '🛒' },
-      { id: 'home', name: 'Home', budget: 100, emoji: '🏠' },
-      { id: 'pets', name: 'Pets', budget: 300, emoji: '🐾' },
-      { id: 'activities', name: 'Activities/Other', budget: 200, emoji: '🎈' },
-      { id: 'twins', name: 'Twins', budget: 200, emoji: '👶' },
+      { id: 'food', name: 'Food', budget: 0, emoji: '🛒' },
+      { id: 'home', name: 'Home', budget: 0, emoji: '🏠' },
+      { id: 'fun', name: 'Activities/Other', budget: 0, emoji: '🎈' },
     ],
-    stores: ['Aldi', 'Costco', 'Target', 'Publix', 'Amazon', 'Walmart'],
-    tags: ['Diapers', 'Wipes', 'Eating out', 'Meal boxes', 'Snacks', 'Millie Moon', 'Medical'],
-    bills: [
-      { id: 'rent', name: 'Rent - Demaris', amount: 1700, day: 1, changes: [] },
-      { id: 'hca', name: 'HCA payment', amount: 75, day: 1, changes: [] },
-      { id: 'loans', name: 'Federal Loans', amount: 90, day: 5, changes: [] },
-      { id: 'ioniq', name: 'Ioniq payment', amount: 375, day: 5, changes: [] },
-      { id: 'santafe', name: 'Santa Fe Payment', amount: 650, day: 11, changes: [] },
-      { id: 'spotify', name: 'Spotify Family', amount: 20, day: 11, changes: [] },
-      { id: 'statefarm', name: 'State Farm', amount: 161, day: 18, changes: [{ from: '2026-11', amount: 150 }] },
-      { id: 'att', name: 'AT&T', amount: 135, day: 24, changes: [{ from: '2026-11', amount: 120 }] },
-      { id: 'amazon', name: 'Amazon', amount: 15, day: 25, changes: [] },
-    ],
-    // Money family sends each month toward a bill; it rides along in checking
-    // until that bill is paid.
-    helpers: [
-      { id: 'demaris', name: 'Demaris', amount: 31, bill: 'att' },
-      { id: 'analisa', name: 'Analisa', amount: 102, bill: 'att' },
-    ],
-    savings: {
-      actual: 2500, asOf: '2026-09-30', hysa: 0,
-      floor: 5000, goalMin: 5000, goalMax: 10000,
-      log: [{ t: at, amount: 2500, kind: 'set', note: 'Starting balance' }],
-      hysaDone: {},
-    },
-    plans: {
-      '2026-08': { nick: 3000, bella: 700, expenses: 4700, other: [], note: 'Nick started COFEMS', endBalance: 2500 },
-      '2026-09': { nick: 4750, bella: 350, expenses: 4700, other: [{ id: 'o1', name: "Nick's birthday", amount: 200 }], endBalance: 2500 },
-      '2026-10': { nick: 4750, bella: 700, expenses: 5000, other: [] },
-      '2026-11': { nick: 5750, bella: 700, expenses: 5000, other: [], note: '$1K from training OT' },
-      '2026-12': {
-        nick: 4750, bella: 700, expenses: 5000, elevate: 3000, elevateToSavings: true,
-        other: [{ id: 'o2', name: 'Xmas presents', amount: 1000 }, { id: 'o3', name: 'Personal property', amount: 400 }],
-        note: 'Fall academy week',
-      },
-    },
-    usual: { nick: 4750, bella: 700 },
-    // Spending: 'log' (log as you go) or 'import' (weekly bank file).
+    stores: ['Aldi', 'Costco', 'Target', 'Walmart', 'Amazon'],
+    tags: ['Eating out', 'Medical'],
+    bills: [],
+    helpers: [],
+    savings: { actual: 0, asOf: D.today(), hysa: 0, floor: 5000, goalMin: 5000, goalMax: 10000, log: [], hysaDone: {} },
+    plans: {},
+    usual: {},
     trackMode: 'log',
     imports: {},
-    // Merchant rules for imports, keyed by Imp.keyOf(description).
-    rules: {
-      'henrico doctors hospital': { action: 'skip', note: 'HCA payment', name: "Henrico Doctors' Hospital" },
-      dashpass: { action: 'skip', note: 'canceled', name: 'DashPass' },
-      nintendo: { action: 'cat', cat: 'activities', name: 'Nintendo' },
-      'hobby lobby': { action: 'cat', cat: 'home', name: 'Hobby Lobby' },
-      'mail and more': { action: 'cat', cat: 'activities', name: 'Mail And More' },
-      'healthy minds ther': { action: 'ask', tags: ['Medical'], name: 'Healthy Minds Therapy' },
-    },
+    rules: {},
+    features: { buckets: false, overview: true },
+    buckets: [],
+    bucketTx: [],
     look: { heading: 'Oswald', body: 'Nunito', colors: { ...Looks.colors }, glass: 0.82, calm: true },
   };
-  const months = {
-    '2026-10': {
-      setup: true, setupAt: at,
-      budgets: { food: 1000, home: 50, pets: 80, activities: 50, twins: 70 },
-      checking: { amount: 4029, at },
-      bills: {},
-      other: [
-        { id: 'x1', name: 'September AT&T', amount: 303, paid: true, paidAt: at - 1 },
-        { id: 'x2', name: 'Demaris food boxes', amount: 151, paid: true, paidAt: at - 1 },
-        { id: 'x3', name: 'Venture X', amount: 879, paid: true, paidAt: at - 1 },
-        { id: 'x4', name: 'Venture One', amount: 84, paid: false },
-      ],
-      back: [
-        { id: 'b1', name: 'AT&T - Analisa', amount: 50, received: false },
-        { id: 'b2', name: 'Chase overpayment (Subaru, Sept)', amount: 613, received: false },
-      ],
-      held: [
-        // They transfer the first week of the month -- not in the $4,029 yet.
-        { id: 'demaris', name: 'Demaris', amount: 31, bill: 'att', received: false },
-        { id: 'analisa', name: 'Analisa', amount: 102, bill: 'att', received: false },
-      ],
-      moved: null,
-    },
-  };
-  return { household, months };
+  return { household, months: {} };
+}
+
+// A setup file (JSON) can fill in a new household: same fields as above, plus
+// optional months. Only known fields are taken.
+const SETUP_FIELDS = ['earners', 'categories', 'stores', 'tags', 'bills', 'helpers', 'savings', 'plans', 'usual',
+  'trackMode', 'rules', 'features', 'buckets', 'bucketTx', 'look'];
+function applySetup(seed, file) {
+  const out = { household: { ...seed.household }, months: { ...seed.months } };
+  for (const k of SETUP_FIELDS) if (file[k] !== undefined) out.household[k] = file[k];
+  if (file.months && typeof file.months === 'object') Object.assign(out.months, file.months);
+  return out;
 }
 
 const Calc = (() => {
+  // Who earns paychecks in this household. Households made before this was a
+  // setting are Nick + Bella.
+  const earners = H => (H.earners && H.earners.length ? H.earners : [{ id: 'nick', name: 'Nick' }, { id: 'bella', name: 'Bella' }]);
+
   const billAmount = (bill, ym) => {
     let amt = Number(bill.amount) || 0;
     const ch = (bill.changes || []).filter(c => c.from <= ym).sort((a, b) => (a.from < b.from ? -1 : 1));
@@ -311,12 +265,11 @@ const Calc = (() => {
       if (ym >= homeYm && !blank(usual[k])) return { v: Number(usual[k]) || 0, est: true };
       return null;
     };
+    const people = earners(H);
     const income = ym => {
-      const p = plans[ym] || {};
-      const n = pay(ym, 'nick');
-      const b = pay(ym, 'bella');
-      if (!n && !b) return null;
-      return (n ? n.v : 0) + (b ? b.v : 0);
+      const got = people.map(e => pay(ym, e.id)).filter(Boolean);
+      if (!got.length) return null;
+      return got.reduce((a, g) => a + g.v, 0);
     };
     const defaultExpenses = ym => {
       const M = months[ym];
@@ -366,8 +319,8 @@ const Calc = (() => {
       const prevIn = income(D.addMonths(ym, -1));
       rows.push({
         ym, plan: p, past, current: ym === homeYm,
-        nick: (pay(ym, 'nick') || {}).v, bella: (pay(ym, 'bella') || {}).v,
-        nickEst: !!(pay(ym, 'nick') || {}).est, bellaEst: !!(pay(ym, 'bella') || {}).est, elevate: Number(p.elevate) || 0, elevateToSavings: p.elevateToSavings !== false,
+        pay: people.map(e => { const g = pay(ym, e.id); return { id: e.id, name: e.name, v: g ? g.v : undefined, est: !!(g && g.est) }; }),
+        elevate: Number(p.elevate) || 0, elevateToSavings: p.elevateToSavings !== false,
         total: inc, prevIn,
         expenses: s ? s.expenses : (p.expenses !== undefined && p.expenses !== '' && p.expenses !== null ? Number(p.expenses) : null),
         other: p.other || [],
@@ -381,5 +334,35 @@ const Calc = (() => {
     return { rows, endOfYear: dec.balance, actual };
   }
 
-  return { billAmount, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
+  // Savings buckets: balance = everything added minus everything spent/moved out.
+  function bucketBalances(H) {
+    const bal = {};
+    for (const b of H.buckets || []) bal[b.id] = 0;
+    for (const t of H.bucketTx || []) if (bal[t.b] !== undefined) bal[t.b] = round2(bal[t.b] + (Number(t.amount) || 0));
+    return bal;
+  }
+  // Split money going into savings: fixed monthly amounts first, then each
+  // bucket's % of what's left -- never past its goal. Whatever can't be placed
+  // (full buckets' shares) is returned as `extra` for the person to decide.
+  function splitIntoBuckets(H, amount) {
+    const bal = bucketBalances(H);
+    const room = b => Math.max(0, (Number(b.goal) || 0) - bal[b.id]);
+    const add = {};
+    let left = round2(amount);
+    for (const b of H.buckets || []) {
+      const fixed = Math.min(Number(b.monthly) || 0, room(b), left);
+      if (fixed > 0) { add[b.id] = round2(fixed); left = round2(left - fixed); }
+    }
+    const base = left;
+    for (const b of H.buckets || []) {
+      const pct = Number(b.pct) || 0;
+      if (!pct) continue;
+      const r = room(b) - (add[b.id] || 0);
+      const share = Math.min(round2(base * pct / 100), Math.max(0, r), left);
+      if (share > 0) { add[b.id] = round2((add[b.id] || 0) + share); left = round2(left - share); }
+    }
+    return { add, extra: round2(left), bal };
+  }
+
+  return { earners, bucketBalances, splitIntoBuckets, billAmount, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
 })();

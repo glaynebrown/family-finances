@@ -27,6 +27,10 @@ const myName = () => ((H().people || {})[me()] || {}).name || (S.user && S.user.
 const calm = () => !H() || !H().look || H().look.calm !== false;
 const homeYm = () => Calc.homeMonth(S.months);
 const catById = id => (H().categories || []).find(c => c.id === id);
+const feat = k => ((H() && H().features) || {})[k];
+const bucketsOn = () => !!feat('buckets');
+const overviewOn = () => feat('overview') !== false;
+
 
 /* ---------- little UI pieces ---------- */
 
@@ -253,8 +257,8 @@ function viewHome() {
     <h1>${D.name(ym)}</h1>
   </header>
   ${M && M.setup ? '' : `<div class="card note-card"><p><b>${D.name(ym)} isn’t set up yet.</b> You can still log purchases — they’ll count against your normal budgets.</p><a class="btn" href="#/setup">Set up ${D.name(ym)}</a></div>`}
-  <div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>
-  ${S.page === 'overview' ? billsSections() : `
+  ${overviewOn() ? `<div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
+  ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
     ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
@@ -448,15 +452,17 @@ function viewYear() {
   const goalMax = Number(sv.goalMax) || 10000;
   const floor = Number(sv.floor) || 5000;
   const proj = y.endOfYear;
-  const top = Math.max(goalMax * 1.1, proj || 0, actual) || 1;
+  const goalAll = bucketsOn() ? (H().buckets || []).reduce((a, b) => a + (Number(b.goal) || 0), 0) : 0;
+  const top = Math.max(bucketsOn() ? goalAll * 1.05 : goalMax * 1.1, proj || 0, actual) || 1;
   const pc = v => `${Math.max(0, Math.min(100, (v / top) * 100))}%`;
   const showActual = Y === hy;
   const bar = `<div class="goal">
       <div class="goal-track">
         ${proj !== null && proj > actual ? `<i class="ghost" style="width:${pc(proj)}"></i>` : ''}
         <i class="fill" style="width:${pc(showActual ? actual : (proj || 0))}"></i>
-        <span class="mark" style="left:${pc(goalMin)}"><em>${money(goalMin)}${floor === goalMin ? ' · floor' : ''}</em></span>
-        <span class="mark" style="left:${pc(goalMax)}"><em>${money(goalMax)} goal</em></span>
+        ${bucketsOn() ? (goalAll ? `<span class="mark" style="left:${pc(goalAll)}"><em>${money(goalAll)} goal</em></span>` : '')
+          : `<span class="mark" style="left:${pc(goalMin)}"><em>${money(goalMin)}${floor === goalMin ? ' · floor' : ''}</em></span>
+        <span class="mark" style="left:${pc(goalMax)}"><em>${money(goalMax)} goal</em></span>`}
       </div>
       <div class="goal-scale"><span>$0</span></div>
     </div>`;
@@ -474,9 +480,10 @@ function viewYear() {
     <div class="big-num">${money(showActual ? actual : proj || 0)}</div>
     ${bar}
     <div class="small muted">${proj !== null ? `On track for <b class="${proj >= goalMin ? 'save-good' : ''}">${money(proj)}</b> by Dec 31` : 'Add income for the months ahead to see a projection'}
-      ${proj !== null ? (proj >= goalMax ? ' — past your goal! 🎉' : proj >= goalMin ? ' — past the minimum.' : ` — ${money(goalMin - proj)} short of the minimum.`) : ''}</div>
-    ${Number(sv.hysa) ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
+      ${proj === null || bucketsOn() ? '' : (proj >= goalMax ? ' — past your goal! 🎉' : proj >= goalMin ? ' — past the minimum.' : ` — ${money(goalMin - proj)} short of the minimum.`)}</div>
+    ${Number(sv.hysa) && !bucketsOn() ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
   </section>
+  ${bucketsOn() && showActual ? bucketsSection(actual) : ''}
   <div class="year-head-row"><h2 class="year-head">Projected Savings</h2>
   ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${shown.map(r => r.ym).join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
   ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : 'Prior data kept in Google Sheets'}</p>` : ''}
@@ -491,20 +498,19 @@ function yearCard(r) {
     ${r.current ? '<span class="pill">This month</span>' : ''}${!open && r.balance !== null ? `<span class="small">${money(r.balance)}</span>` : ''}</div>`;
   if (!open) return `<button class="mcard card collapsed" data-act="expand" data-ym="${r.ym}" data-open="0" aria-expanded="false">${head}</button>`;
   const line = (label, v, cls = '') => `<div class="line ${cls}"><span>${label}</span><b>${v === null || v === undefined || v === '' ? '—' : money(v)}</b></div>`;
-  // Tap a value to change it right here (e.g. Nick picking up OT in November).
+  // Tap a value to change it right here (e.g. picking up overtime in November).
   const eline = (label, v, k, est) => `<div class="line"><span>${label}${est ? ' <span class="small muted">usual</span>' : ''}</span><button class="val-edit ${est ? 'est' : ''}" data-act="inc" data-ym="${r.ym}" data-k="${k}" aria-label="Change ${esc(label.replace(/<[^>]+>/g, ''))}">${v === null || v === undefined || v === '' ? '—' : money(v)}</button></div>`;
   const prevName = D.short(D.addMonths(r.ym, -1));
   const hint = { auto: `${prevName} income − expenses − other${r.elevate ? ' + additional' : ''}`, live: 'from this month’s checklist', moved: 'moved at setup', set: 'set by you', noincome: `add ${prevName} income to estimate` }[r.kind] || '';
   const p = r.plan || {};
   // ElevateEMS pay is additional income in that same month (not a paycheck for next month).
-  const elev = r.elevate ? eline(`Additional income <span class="small muted">ElevateEMS</span>`, r.elevate, 'elevate') : '';
+  const elev = r.elevate ? eline(`Additional income${p.elevateName ? ` <span class="small muted">${esc(p.elevateName)}</span>` : ''}`, r.elevate, 'elevate') : '';
   const elevBtn = '';
   return `<section class="mcard card ${r.current ? 'current' : ''}">
     <button class="plain" data-act="expand" data-ym="${r.ym}" data-open="1" aria-expanded="true">${head}</button>
     <div class="mbody">
       <div class="next-funds">
-        ${eline('Nick income', r.nick, 'nick', r.nickEst)}
-        ${eline('Bella income', r.bella, 'bella', r.bellaEst)}
+        ${r.pay.map(e => eline(`${esc(e.name)} income`, e.v, e.id, e.est)).join('')}
         ${line('Total <span class="small muted">(for next month)</span>', r.total, 'sub')}
       </div>
       ${line(`${prevName}${prevName === D.name(D.addMonths(r.ym, -1)) ? '' : '.'} income`, r.prevIn, 'strong')}
@@ -530,9 +536,10 @@ function openPlan(ym) {
   const v = x => (x === undefined || x === null ? '' : x);
   S.sheet = 'plan';
   openSheet(`<div class="sheet-head"><h2>${D.label(ym)}</h2><button class="x" data-act="close">×</button></div>
-    <div class="two"><label class="field"><span class="label">Nick income</span><input id="p-nick" inputmode="decimal" value="${v(p.nick)}"></label>
-    <label class="field"><span class="label">Bella income</span><input id="p-bella" inputmode="decimal" value="${v(p.bella)}"></label></div>
-    <label class="field"><span class="label">Additional income — ElevateEMS <span class="muted small">(class months; lands in ${D.name(ym)}’s Additional income when you set it up)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
+    <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)} income</span><input id="p-pay-${esc(e.id)}" inputmode="decimal" value="${v(p[e.id])}"></label>`).join('')}</div>
+    <div class="two"><label class="field"><span class="label">Additional income <span class="muted small">(one-time, this month)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
+    <label class="field"><span class="label">What is it?</span><input id="p-elevname" placeholder="e.g. ElevateEMS" value="${esc(p.elevateName || '')}"></label></div>
+    <p class="small muted">Additional income goes into ${D.name(ym)}’s savings and shows up on its checklist when you set it up — it isn’t next month’s income.</p>
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
     <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
       <div class="add-row"><input id="p-oname" placeholder="What"><input id="p-oamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-oadd">Add</button></div></div>
@@ -552,7 +559,8 @@ async function savePlan() {
   const val = id => { const n = num($(id).value); return n === null ? null : n; };
   const p = {
     ...old,
-    nick: val('#p-nick'), bella: val('#p-bella'), elevate: val('#p-elevate'),
+    ...Object.fromEntries(Calc.earners(H()).map(e => [e.id, val(`#p-pay-${e.id}`)])),
+    elevate: val('#p-elevate'), elevateName: $('#p-elevname').value.trim() || null,
     elevateToSavings: true, expenses: val('#p-exp'), savings: val('#p-sav'),
     other: S.plan.other, note: $('#p-note').value.trim(),
     budgets: (() => {
@@ -625,6 +633,7 @@ function moveCard() {
 // Every December (and January, in case it slips): move anything above the
 // savings floor to the HYSA, then look ahead to the next year.
 function hysaCard() {
+  if (bucketsOn()) return '';
   const now = D.curYm();
   const m = D.monthNum(now);
   if (m !== 12 && m !== 1) return '';
@@ -680,7 +689,7 @@ function viewReview() {
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
   </section>
   <section class="card"><h2>Every purchase</h2>${s.list.length ? s.list.map(p => purchaseRow(p)).join('') : '<p class="muted small">None yet.</p>'}</section>
-  ${Store.configured ? '' : '<div class="card"><p class="small muted">Sample mode keeps everything in this browser. Once Firebase is connected, you and Nick share the same data.</p><button class="btn ghost small" data-act="demo-reset">Reset sample data</button></div>'}`;
+  ${Store.configured ? '' : '<div class="card"><p class="small muted">Sample mode keeps everything in this browser. Once Firebase is connected, you and Nick share the same data.</p><button class="btn ghost small" data-act="demo-reset">Reset sample data</button> <button class="btn ghost small" data-act="setup-file">Load setup file</button></div>'}`;
 }
 
 // One item (a category, store or tag) over the last 12 months: a simple bar chart
@@ -718,6 +727,101 @@ function openItem(key) {
     ${list.length ? list.map(p => purchaseRow(p)).join('') : '<p class="muted small">No purchases this month.</p>'}
     <details class="small"><summary>As a table</summary><table class="tbl">${months.map((m, i) => `<tr><td>${D.label(m)}</td><td>${money(vals[i])}</td></tr>`).join('')}</table></details>`);
 }
+
+/* ---------- Savings buckets ---------- */
+
+// Every savings dollar has a job: each bucket shows its balance toward its goal.
+function bucketsSection(actual) {
+  const h = H();
+  const bal = Calc.bucketBalances(h);
+  const list = h.buckets || [];
+  const sum = round2(list.reduce((a, b) => a + bal[b.id], 0));
+  const unassigned = round2(actual - sum);
+  return `<div class="year-head-row"><h2 class="year-head">Savings buckets</h2></div>
+  <section class="buckets">
+    ${list.map(b => {
+      const goal = Number(b.goal) || 0;
+      const full = goal && bal[b.id] >= goal - 0.004;
+      const pct = goal ? Math.min(100, (bal[b.id] / goal) * 100) : 0;
+      const fill = b.monthly ? `${money(b.monthly)}/mo` : Number(b.pct) ? `${b.pct}%` : '';
+      return `<div class="bucket card" role="button" tabindex="0" data-act="bucket" data-id="${esc(b.id)}">
+        <div class="row between"><b>${esc(b.name)}</b><span><b>${money(bal[b.id])}</b> <span class="muted small">/ ${money(goal)}</span></span></div>
+        <div class="bar save-bar"><i style="width:${pct}%"></i></div>
+        <div class="small muted">${full ? '✓ Full' : `${money(Math.max(0, goal - bal[b.id]))} to go`}${fill ? ` · fills ${fill}` : ''}${b.note ? ` · ${esc(b.note)}` : ''}</div>
+      </div>`;
+    }).join('')}
+    ${Math.abs(unassigned) > 0.004 ? `<div class="card unassigned"><div class="row between"><b>${unassigned > 0 ? 'Not assigned' : 'Buckets are over your savings by'}</b><b>${money(Math.abs(unassigned))}</b></div>
+      <p class="small muted">${unassigned > 0 ? 'Savings that isn’t in a bucket yet. Tap a bucket → Add money to give it a job.' : 'The buckets add up to more than your savings balance. Check a bucket’s balance or update your savings.'}</p></div>` : ''}
+    <button class="linkish small add-link" data-act="bucket-new">+ Add bucket</button>
+  </section>`;
+}
+
+const bucketById = id => (H().buckets || []).find(b => b.id === id);
+async function addBucketTx(list) {
+  const tx = [...(H().bucketTx || []), ...list.map(t => ({ id: newId(), date: D.today(), t: Date.now(), ...t }))].slice(-2000);
+  await B.setH([[['bucketTx'], tx]]);
+}
+
+function openBucket(id) {
+  const b = bucketById(id);
+  if (!b) return;
+  const bal = Calc.bucketBalances(H())[id];
+  const hist = (H().bucketTx || []).filter(t => t.b === id).slice().reverse().slice(0, 40);
+  const others = (H().buckets || []).filter(x => x.id !== id);
+  S.sheet = 'bucket';
+  openSheet(`<div class="sheet-head"><h2>${esc(b.name)}</h2><button class="x" data-act="close">×</button></div>
+    <div class="line"><span>Balance</span><b class="big">${money(bal)}</b></div>
+    <div class="seg">${[['spend', 'Spend from it'], ['add', 'Add money'], ['move', 'Move']].map(([k, l]) => `<button class="${S.bkMode === k ? 'on' : ''}" data-act="bk-mode" data-v="${k}" data-id="${esc(id)}">${l}</button>`).join('')}</div>
+    <div class="two"><label class="field"><span class="label">Amount</span><input id="bk-amt" inputmode="decimal" placeholder="$"></label>
+      ${S.bkMode === 'move'
+        ? `<label class="field"><span class="label">Move to</span><select id="bk-to">${others.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></label>`
+        : `<label class="field"><span class="label">Date</span><input id="bk-date" type="date" value="${D.today()}"></label>`}</div>
+    <label class="field"><span class="label">${S.bkMode === 'spend' ? 'What was it for?' : 'Note'}</span><input id="bk-note" placeholder="${S.bkMode === 'spend' ? 'e.g. Oil change (Walmart)' : 'optional'}"></label>
+    <p class="small muted">${S.bkMode === 'spend' ? 'Money that left savings. Lowers this bucket and your savings — its % next month stays the same.' : S.bkMode === 'add' ? 'New money into savings for this bucket (raises your savings too).' : 'Moves money between buckets. Your savings total doesn’t change.'}</p>
+    <button class="btn full" data-act="bk-save" data-id="${esc(id)}">${S.bkMode === 'spend' ? 'Save spending' : S.bkMode === 'add' ? 'Add it' : 'Move it'}</button>
+    <details class="small"><summary>Edit bucket (name, goal, %)</summary>
+      <label class="field"><span class="label">Name</span><input data-ch="bk" data-id="${esc(id)}" data-f="name" value="${esc(b.name)}"></label>
+      <div class="three">
+        <label class="field"><span class="label">Goal</span><input data-ch="bk" data-id="${esc(id)}" data-f="goal" inputmode="decimal" value="${esc(b.goal)}"></label>
+        <label class="field"><span class="label">% of extra</span><input data-ch="bk" data-id="${esc(id)}" data-f="pct" inputmode="decimal" value="${esc(b.pct || 0)}"></label>
+        <label class="field"><span class="label">or $/month</span><input data-ch="bk" data-id="${esc(id)}" data-f="monthly" inputmode="decimal" value="${esc(b.monthly || '')}" placeholder="—"></label>
+      </div>
+      <label class="field"><span class="label">Correct the balance <span class="small muted">(doesn’t change your savings total)</span></span><input data-ch="bk-bal" data-id="${esc(id)}" inputmode="decimal" value="${bal}"></label>
+      <label class="field"><span class="label">Note on the card</span><input data-ch="bk" data-id="${esc(id)}" data-f="note" value="${esc(b.note || '')}" placeholder="e.g. Don’t touch"></label>
+      <button class="btn ghost small danger" data-act="bk-del" data-id="${esc(id)}">Remove bucket</button>
+    </details>
+    <h3>History</h3>
+    ${hist.length ? hist.map(t => `<div class="line small"><span>${D.niceDay(t.date)} · ${esc(t.note || { fill: 'Monthly savings', spend: 'Spent', add: 'Added', move: 'Moved', adjust: 'Balance corrected', start: 'Starting balance', cover: 'Covered overspending' }[t.kind] || '')}</span><span class="${t.amount < 0 ? 'neg' : ''}">${t.amount > 0 ? '+' : ''}${money(t.amount)}</span></div>`).join('') : '<p class="muted small">Nothing yet.</p>'}`);
+}
+
+// Where money going into (or out of) savings lands. Positive: each bucket's
+// % (up to its goal) is filled in, and anything left over is hers to place.
+// Negative: she picks which buckets cover it.
+function openAllocate(amount, done) {
+  const sp = amount > 0 ? Calc.splitIntoBuckets(H(), amount) : { add: {}, extra: round2(-amount), bal: Calc.bucketBalances(H()) };
+  S.alloc = { amount, auto: sp.add, toPlace: sp.extra, pick: {}, done };
+  S.sheet = 'alloc';
+  openSheet(allocHtml());
+}
+function allocHtml() {
+  const A = S.alloc;
+  const bal = Calc.bucketBalances(H());
+  const placed = round2(Object.values(A.pick).reduce((a, v) => a + (Number(v) || 0), 0));
+  const left = round2(A.toPlace - placed);
+  const out = A.amount < 0;
+  return `<div class="sheet-head"><h2>${out ? `Cover ${money(-A.amount)}` : `Split ${money(A.amount)}`}</h2><button class="x" data-act="close">×</button></div>
+    <p class="small muted">${out ? 'Pick which buckets this comes out of.' : 'Each bucket gets its share until it’s full. Place whatever’s left however you like.'}</p>
+    ${(H().buckets || []).map(b => {
+      const auto = A.auto[b.id] || 0;
+      const goal = Number(b.goal) || 0;
+      return `<div class="line alloc-line"><span><b>${esc(b.name)}</b> <span class="small muted">${money(bal[b.id])}${goal ? ` / ${money(goal)}` : ''}</span>${auto ? `<span class="small save-good"> +${money(auto)} ${b.monthly ? '(monthly)' : `(${b.pct}%)`}</span>` : ''}</span>
+        <input class="mini" data-ch="alloc" data-id="${esc(b.id)}" inputmode="decimal" placeholder="${out ? '−$' : '+$'}" value="${A.pick[b.id] || ''}"></div>`;
+    }).join('')}
+    ${A.toPlace > 0 ? `<div class="line total-line ${Math.abs(left) > 0.004 ? 'neg' : ''}"><span>${out ? 'Still to cover' : 'Left to place'}</span><b>${money(left)}</b></div>
+      ${!out ? `<div class="row gap wrap"><button class="btn ghost small" data-act="alloc-even">Split evenly</button><select id="alloc-one" data-ch="alloc-one" aria-label="Put it all in one bucket"><option value="">All to one bucket…</option>${(H().buckets || []).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></div>` : ''}` : ''}
+    <div class="row end sheet-foot"><button class="btn" data-act="alloc-save" ${Math.abs(left) > 0.004 && out ? 'disabled' : ''}>${Math.abs(left) > 0.004 && !out ? `Save (${money(left)} not assigned)` : 'Save'}</button></div>`;
+}
+function redrawAlloc() { const y = $('#sheet').scrollTop; $('#sheet').innerHTML = allocHtml(); $('#sheet').scrollTop = y; }
 
 /* ---------- Weekly import (Navy Federal CSV) ---------- */
 
@@ -861,13 +965,12 @@ function startDraft() {
     const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
     d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
     d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b }));
-    if (Number(plan.elevate) > 0) d.back.push({ id: newId(), name: 'ElevateEMS pay', amount: Number(plan.elevate), received: false });
+    if (Number(plan.elevate) > 0) d.back.push({ id: newId(), name: plan.elevateName || 'Additional income', amount: Number(plan.elevate), received: false });
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
   }
   for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Calc.budgetFor(H(), null, c, N);
-  d.nick = plan.nick ?? '';
-  d.bella = plan.bella ?? '';
+  d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? '']));
   S.draft = d;
 }
 
@@ -888,7 +991,7 @@ function readDraftInputs() {
   if (v('#d-checking') !== undefined) d.checking = v('#d-checking');
   for (const c of H().categories) { const x = v(`#d-b-${c.id}`); if (x !== undefined) d.budgets[c.id] = num(x) || 0; }
   for (const h of d.held) { const x = v(`#d-h-${h.id}`); if (x !== undefined) h.amount = num(x) || 0; }
-  if (v('#d-nick') !== undefined) { d.nick = v('#d-nick'); d.bella = v('#d-bella'); }
+  for (const e of Calc.earners(H())) { const x = v(`#d-pay-${e.id}`); if (x !== undefined) d.pay[e.id] = x; }
 }
 
 function viewSetup() {
@@ -932,9 +1035,8 @@ function viewSetup() {
       <div class="line total-line"><span>Total</span><b>${money(Object.values(d.budgets).reduce((a, b) => a + (Number(b) || 0), 0))}</b></div>`;
   } else if (d.step === 4) {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
-      <div class="two"><label class="field"><span class="label">Nick</span><input id="d-nick" inputmode="decimal" value="${esc(d.nick)}"></label>
-      <label class="field"><span class="label">Bella</span><input id="d-bella" inputmode="decimal" value="${esc(d.bella)}"></label></div>
-      <p class="small muted">ElevateEMS pay for ${D.name(N)} is under Additional income on the Bills & extras step.</p>`;
+      <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input id="d-pay-${esc(e.id)}" inputmode="decimal" value="${esc(d.pay[e.id])}"></label>`).join('')}</div>
+      <p class="small muted">One-time money for ${D.name(N)} goes under Additional income on the Bills & extras step.</p>`;
   } else {
     const M = draftMonth(d);
     const c = Calc.checklist(H(), M, N, S.purchases);
@@ -971,18 +1073,24 @@ async function finishSetup(mode) {
     const v = readMove('setup');
     if (!v) { toast('Type the amount you moved'); return; }
     M.moved = v;
+    if (bucketsOn() && (H().buckets || []).length && !S.allocTx) {
+      openAllocate(v, tx => { S.allocTx = tx; finishSetup(mode); });
+      return;
+    }
   }
   const R = D.addMonths(N, -1);
   const plans = H().plans || {};
   const actual = Number((H().savings || {}).actual) || 0;
   const pairs = [];
   const nv = x => (num(x) === null ? B.DEL : num(x));
-  pairs.push([['plans', N, 'nick'], nv(d.nick)], [['plans', N, 'bella'], nv(d.bella)]);
+  for (const e of Calc.earners(H())) pairs.push([['plans', N, e.id], nv(d.pay[e.id])]);
   if (!plans[R] || plans[R].endBalance === undefined) pairs.push([['plans', R, 'endBalance'], actual]);
   await B.setMonth(N, M);
   await B.setMonthField(N, ['bills'], {});
   await B.setH(pairs);
   if (M.moved) await setSavings(actual + M.moved, `${D.name(N)} setup`, M.moved > 0 ? 'in' : 'out');
+  if (S.allocTx && S.allocTx.length) await addBucketTx(S.allocTx);
+  S.allocTx = null;
   S.draft = null;
   location.hash = '#/home';
   if (M.moved > 0) confetti();
@@ -1055,11 +1163,19 @@ function viewSettings() {
         <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
   </section>
 
-  <section class="card"><h2>Usual monthly income</h2>
-    <div class="two">
-      <label class="field"><span class="label">Nick</span><input data-ch="usual" data-f="nick" inputmode="decimal" value="${esc((h.usual || {}).nick)}" placeholder="$"></label>
-      <label class="field"><span class="label">Bella</span><input data-ch="usual" data-f="bella" inputmode="decimal" value="${esc((h.usual || {}).bella)}" placeholder="$"></label>
-    </div>
+  <section class="card"><h2>Features</h2>
+    ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
+      ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.']].map(([k, l, d]) => {
+      const on = k === 'overview' ? overviewOn() : !!feat(k);
+      return `<div class="line feature"><span><b>${l}</b><span class="small muted">${d}</span></span><button class="switch ${on ? 'on' : ''}" data-act="feature" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${l}"><i></i></button></div>`;
+    }).join('')}
+  </section>
+
+  <section class="card"><h2>People & usual income</h2>
+    ${Calc.earners(h).map(e => `<div class="edit-row"><input class="grow" data-ch="earner" data-id="${esc(e.id)}" value="${esc(e.name)}" aria-label="Name">${Calc.earners(h).length > 1 ? `<button class="x small" data-act="person-del" data-id="${esc(e.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+    <button class="linkish small" data-act="person-add">+ Add a person</button>
+    <h3>Usual monthly income</h3>
+    <div class="two">${Calc.earners(h).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input data-ch="usual" data-f="${esc(e.id)}" inputmode="decimal" value="${esc((h.usual || {})[e.id])}" placeholder="$"></label>`).join('')}</div>
     <p class="small muted">Used on the Year tab for any month you haven’t filled in (shown as “usual”). Type a real amount on a month and it takes over.</p>
   </section>
 
@@ -1095,7 +1211,7 @@ function viewSettings() {
   </section>
 
   <section class="card"><h2>Household</h2>
-    ${Store.configured ? `<p>Share this code with Nick so he can join (Create account → Join with a code):</p><div class="code">${esc(h.joinCode)}</div><button class="btn ghost small" data-act="copy-code">Copy code</button>` : '<p class="small muted">Sample mode — the join code appears here once Firebase is connected.</p>'}
+    ${Store.configured ? `<p>Share this code with anyone joining this household (Create account → Join with a code):</p><div class="code">${esc(h.joinCode)}</div><button class="btn ghost small" data-act="copy-code">Copy code</button>` : '<p class="small muted">Sample mode — the join code appears here once Firebase is connected.</p>'}
     <p class="small muted">In the household: ${Object.values(h.people || {}).map(p => esc(p.name)).join(', ')}</p>
   </section>
 
@@ -1285,11 +1401,86 @@ const acts = {
     const ok = await ask(v >= 0 ? `Moved ${money(v)} from checking to savings?` : `Took ${money(-v)} from savings into checking?`, 'Yes');
     if (!ok) return;
     const ym = homeYm();
-    await B.setMonth(ym, { moved: v });
-    await setSavings((Number(H().savings.actual) || 0) + v, `${D.name(ym)} excess`, v >= 0 ? 'in' : 'out');
-    if (v > 0) confetti();
+    const finish = async tx => {
+      await B.setMonth(ym, { moved: v });
+      await setSavings((Number(H().savings.actual) || 0) + v, `${D.name(ym)} excess`, v >= 0 ? 'in' : 'out');
+      if (tx && tx.length) await addBucketTx(tx);
+      if (v > 0) confetti();
+    };
+    if (bucketsOn() && (H().buckets || []).length) openAllocate(v, finish); else await finish();
   },
 
+  bucket: el => { S.bkMode = S.bkMode || 'spend'; openBucket(el.dataset.id); },
+  'bk-mode': el => { S.bkMode = el.dataset.v; openBucket(el.dataset.id); },
+  'bk-save': async el => {
+    const id = el.dataset.id;
+    const amt = num($('#bk-amt').value);
+    if (!amt || amt <= 0) { toast('Type an amount'); return; }
+    const note = $('#bk-note').value.trim();
+    const date = ($('#bk-date') && $('#bk-date').value) || D.today();
+    const actual = Number(H().savings.actual) || 0;
+    closeSheet();
+    if (S.bkMode === 'move') {
+      const to = $('#bk-to') ? $('#bk-to').value : null;
+      const toId = to || (H().buckets || []).find(b => b.id !== id)?.id;
+      if (!toId) return;
+      await addBucketTx([{ b: id, amount: -amt, kind: 'move', note: note || `Moved to ${bucketById(toId).name}` }, { b: toId, amount: amt, kind: 'move', note: note || `Moved from ${bucketById(id).name}` }]);
+      toast(`Moved ${money(amt)}`);
+    } else if (S.bkMode === 'add') {
+      await addBucketTx([{ b: id, amount: amt, kind: 'add', note, date }]);
+      await setSavings(actual + amt, note || `Added to ${bucketById(id).name}`, 'in');
+      toast(`Added ${money(amt)} to ${bucketById(id).name}`);
+    } else {
+      await addBucketTx([{ b: id, amount: -amt, kind: 'spend', note, date }]);
+      await setSavings(actual - amt, note || `Spent from ${bucketById(id).name}`, 'out');
+      toast(`${money(amt)} from ${bucketById(id).name}`);
+    }
+  },
+  'bk-del': async el => {
+    const b = bucketById(el.dataset.id);
+    if (!(await ask(`Remove ${esc(b.name)}? Its balance becomes “Not assigned” savings.`, 'Remove'))) return;
+    closeSheet();
+    await B.setH([[['buckets'], (H().buckets || []).filter(x => x.id !== b.id)], [['bucketTx'], (H().bucketTx || []).filter(t => t.b !== b.id)]]);
+  },
+  'bucket-new': async () => {
+    const id = newId();
+    await B.setH([[['buckets'], [...(H().buckets || []), { id, name: 'New bucket', goal: 0, pct: 0 }]]]);
+    S.bkMode = 'add';
+    setTimeout(() => openBucket(id), 50);
+  },
+  'alloc-even': () => {
+    const A = S.alloc;
+    const list = H().buckets || [];
+    if (!list.length) return;
+    const each = Math.floor((A.toPlace / list.length) * 100) / 100;
+    A.pick = {};
+    list.forEach((b, i) => { A.pick[b.id] = i === list.length - 1 ? round2(A.toPlace - each * (list.length - 1)) : each; });
+    redrawAlloc();
+  },
+  'alloc-save': async () => {
+    const A = S.alloc;
+    const out = A.amount < 0;
+    const tx = [];
+    for (const id in A.auto) if (A.auto[id]) tx.push({ b: id, amount: A.auto[id], kind: 'fill' });
+    for (const id in A.pick) { const v = Number(A.pick[id]) || 0; if (v) tx.push({ b: id, amount: out ? -Math.abs(v) : v, kind: out ? 'cover' : 'fill' }); }
+    const done = A.done;
+    S.alloc = null;
+    closeSheet();
+    await done(tx);
+  },
+  'person-add': async () => { await B.setH([[['earners'], [...Calc.earners(H()), { id: newId(), name: 'New person' }]]]); },
+  'person-del': async el => {
+    const list = Calc.earners(H());
+    if (list.length < 2) return;
+    if (!(await ask('Remove this person’s income line?', 'Remove'))) return;
+    await B.setH([[['earners'], list.filter(e => e.id !== el.dataset.id)]]);
+  },
+  feature: async el => {
+    const k = el.dataset.k;
+    const on = !(k === 'overview' ? overviewOn() : feat(k));
+    await B.setH([[['features', k], on]]);
+  },
+  'setup-file': () => pickSetupFile(async data => { await Demo.loadSetup(data); toast('Setup file loaded'); }),
   yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
   'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
@@ -1554,6 +1745,25 @@ const changes = {
     rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
+  alloc: el => { S.alloc.pick[el.dataset.id] = num(el.value) || 0; redrawAlloc(); },
+  'alloc-one': el => { if (!el.value) return; S.alloc.pick = { [el.value]: S.alloc.toPlace }; redrawAlloc(); },
+  bk: async el => {
+    const f = el.dataset.f;
+    const v = ['goal', 'pct', 'monthly'].includes(f) ? (num(el.value) || 0) : el.value.trim();
+    await B.setH([[['buckets'], (H().buckets || []).map(b => (b.id === el.dataset.id ? { ...b, [f]: v } : b))]]);
+  },
+  'bk-bal': async el => {
+    const v = num(el.value);
+    if (v === null) return;
+    const cur = Calc.bucketBalances(H())[el.dataset.id];
+    if (Math.abs(v - cur) < 0.005) return;
+    await addBucketTx([{ b: el.dataset.id, amount: round2(v - cur), kind: 'adjust' }]);
+  },
+  earner: async el => {
+    const name = el.value.trim();
+    if (!name) return;
+    await B.setH([[['earners'], Calc.earners(H()).map(e => (e.id === el.dataset.id ? { ...e, name } : e))]]);
+  },
   usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
   font: async el => { await B.setH([[['look', el.dataset.f], el.value]]); },
@@ -1575,7 +1785,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'l-amount') { e.preventDefault(); $('#l-note').focus(); }
   if (e.key === 'Enter' && e.target.matches('.val-in, .item-in')) { e.preventDefault(); e.target.blur(); }
   if (e.key === 'Escape' && e.target.matches('.val-in, .item-in')) { e.target.value = ''; e.target.blur(); render(); }
-  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.cat[role="button"]')) { e.preventDefault(); acts[e.target.dataset.act](e.target); }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); acts[e.target.dataset.act](e.target); }
   if (e.key === 'Escape' && sheetOpen()) closeSheet();
 });
 
@@ -1625,16 +1835,32 @@ function authScreen(mode = 'in', msg = '') {
   };
 }
 
+// Read a setup file (JSON) someone was given to fill in a new household.
+function pickSetupFile(cb) {
+  const f = $('#file');
+  f.value = '';
+  f.accept = '.json,application/json';
+  f.onchange = async () => {
+    const file = f.files[0];
+    f.accept = 'image/*';
+    if (!file) return;
+    try { await cb(JSON.parse(await file.text())); } catch (e) { console.error(e); toast('That setup file couldn’t be read'); }
+  };
+  f.click();
+}
+
 function householdScreen(msg = '') {
   $('#tabs').hidden = true;
   view.innerHTML = `<div class="auth"><img class="logo" src="icon-192.png" alt=""><h1>Welcome, ${esc(S.user.name || S.newName || '')}</h1>
     ${msg ? `<p class="msg">${esc(msg)}</p>` : ''}
-    <section class="card"><h2>Start our budget</h2><p class="small muted">Sets up October with your checklist, bills and year plan already filled in.</p><button class="btn full" id="h-new">Start</button></section>
+    <section class="card"><h2>Start a budget</h2><p class="small muted">Starts blank — add your categories, bills and income in Settings. If someone gave you a setup file, load it instead.</p>
+      <button class="btn full" id="h-new">Start blank</button><button class="btn full ghost" id="h-file" style="margin-top:8px">Load setup file</button></section>
     <section class="card"><h2>Join with a code</h2><p class="small muted">If the other person already started, enter the code from their Settings.</p>
       <input id="h-code" placeholder="8-letter code" autocapitalize="characters"><button class="btn full ghost" id="h-join">Join</button></section>
     <p class="center small"><button class="linkish" id="h-out">Sign out</button></p></div>`;
   const name = S.user.name || S.newName || 'Me';
   $('#h-new').onclick = async () => { try { const id = await Store.createHousehold(name); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } };
+  $('#h-file').onclick = () => pickSetupFile(async data => { try { const id = await Store.createHousehold(name, data); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } });
   $('#h-join').onclick = async () => { try { const id = await Store.joinHousehold($('#h-code').value, name); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } };
   $('#h-out').onclick = () => Store.signOut();
 }

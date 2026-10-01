@@ -382,3 +382,16 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .cat .bar { margin-bottom: 2px; }
 .cat .of { white-space: nowrap; }
 .val-edit.small-edit { font-weight: 600; font-size: inherit; color: inherit; }
+/* Savings buckets */
+.buckets { display: grid; gap: 10px; margin-bottom: 12px; }
+.bucket { margin: 0; cursor: pointer; }
+.save-bar i { background: var(--save); }
+.unassigned { border-left: 5px solid var(--over); margin: 0; }
+.alloc-line .mini { width: 92px; flex: none; }
+.alloc-line > span { display: flex; flex-direction: column; }
+.btn:disabled { opacity: .5; }
+.feature > span { display: flex; flex-direction: column; gap: 2px; }
+.switch { flex: none; width: 50px; height: 30px; border-radius: 99px; border: 0; background: rgba(43, 37, 34, .18); position: relative; cursor: pointer; transition: background .2s; }
+.switch i { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .2s; }
+.switch.on { background: var(--save); }
+.switch.on i { left: 23px; }
