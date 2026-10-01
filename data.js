@@ -113,11 +113,12 @@ function seedHousehold(uid, name) {
       '2026-10': { nick: 4750, bella: 700, expenses: 5000, other: [] },
       '2026-11': { nick: 5750, bella: 700, expenses: 5000, other: [], note: '$1K from training OT' },
       '2026-12': {
-        nick: 4750, bella: 3700, expenses: 5000, elevate: 3000, elevateToSavings: true,
+        nick: 4750, bella: 700, expenses: 5000, elevate: 3000, elevateToSavings: true,
         other: [{ id: 'o2', name: 'Xmas presents', amount: 1000 }, { id: 'o3', name: 'Personal property', amount: 400 }],
         note: 'Fall academy week',
       },
     },
+    usual: { nick: 4750, bella: 700 },
     look: { heading: 'Oswald', body: 'Nunito', colors: { ...Looks.colors }, glass: 0.82, calm: true },
   };
   const months = {
@@ -274,12 +275,22 @@ const Calc = (() => {
   function year(H, months, Y, purchases, homeYm) {
     const plans = H.plans || {};
     const actual = Number((H.savings || {}).actual) || 0;
+    // Paychecks for a month: what's typed in, or the usual amounts from
+    // Settings for months from now on that haven't been filled in.
+    const usual = H.usual || {};
+    const blank = v => v === undefined || v === null || v === '';
+    const pay = (ym, k) => {
+      const p = plans[ym] || {};
+      if (!blank(p[k])) return { v: Number(p[k]) || 0, est: false };
+      if (ym >= homeYm && !blank(usual[k])) return { v: Number(usual[k]) || 0, est: true };
+      return null;
+    };
     const income = ym => {
-      const p = plans[ym];
-      if (!p) return null;
-      const has = ['nick', 'bella', 'elevate'].some(k => p[k] !== undefined && p[k] !== null && p[k] !== '');
-      if (!has) return null;
-      return (Number(p.nick) || 0) + (Number(p.bella) || 0) + (p.elevateToSavings === false ? Number(p.elevate) || 0 : 0);
+      const p = plans[ym] || {};
+      const n = pay(ym, 'nick');
+      const b = pay(ym, 'bella');
+      if (!n && !b) return null;
+      return (n ? n.v : 0) + (b ? b.v : 0);
     };
     const defaultExpenses = ym => {
       const M = months[ym];
@@ -309,11 +320,12 @@ const Calc = (() => {
           if (M.moved !== null && M.moved !== undefined) { sv = Number(M.moved); kind = 'moved'; }
           else { sv = checklist(H, M, ym, purchases).excess; kind = 'live'; }
         } else if (p.savings !== undefined && p.savings !== null && p.savings !== '') { sv = Number(p.savings); kind = 'set'; }
-        else if (prevIn === null) { sv = 0; kind = 'noincome'; }
-        else { sv = round2(prevIn - expenses - other); kind = 'auto'; }
-        const elev = p.elevateToSavings !== false && !p.elevateDone ? Number(p.elevate) || 0 : 0;
-        if (ym === homeYm) running = actual + (kind === 'moved' ? 0 : sv) + elev;
-        else running = running + sv + elev;
+        // ElevateEMS pay is additional income in its own month. Once that month
+        // is set up it's on the checklist (so it's already in the live number).
+        else if (prevIn === null) { sv = Number(p.elevate) || 0; kind = 'noincome'; }
+        else { sv = round2(prevIn - expenses - other + (Number(p.elevate) || 0)); kind = 'auto'; }
+        if (ym === homeYm) running = actual + (kind === 'moved' ? 0 : sv);
+        else running = running + sv;
         bal[ym] = round2(running);
         savingsOf[ym] = { sv: round2(sv), kind, prevIn, expenses: round2(expenses), other: round2(other) };
         ym = D.addMonths(ym, 1);
@@ -328,14 +340,15 @@ const Calc = (() => {
       const prevIn = income(D.addMonths(ym, -1));
       rows.push({
         ym, plan: p, past, current: ym === homeYm,
-        nick: p.nick, bella: p.bella, elevate: Number(p.elevate) || 0, elevateToSavings: p.elevateToSavings !== false,
+        nick: (pay(ym, 'nick') || {}).v, bella: (pay(ym, 'bella') || {}).v,
+        nickEst: !!(pay(ym, 'nick') || {}).est, bellaEst: !!(pay(ym, 'bella') || {}).est, elevate: Number(p.elevate) || 0, elevateToSavings: p.elevateToSavings !== false,
         total: inc, prevIn,
         expenses: s ? s.expenses : (p.expenses !== undefined && p.expenses !== '' && p.expenses !== null ? Number(p.expenses) : null),
         other: p.other || [],
         savings: s ? s.sv : (p.savings !== undefined && p.savings !== '' ? Number(p.savings) : null),
         kind: s ? s.kind : 'past',
         balance: past ? (p.endBalance !== undefined ? Number(p.endBalance) : null) : (bal[ym] !== undefined ? bal[ym] : null),
-        hasData: !!plans[ym],
+        hasData: !!plans[ym] || ym >= homeYm,
       });
     }
     const dec = rows[11];

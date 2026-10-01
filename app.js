@@ -461,13 +461,11 @@ function yearCard(r) {
   // Tap a value to change it right here (e.g. Nick picking up OT in November).
   const eline = (label, v, k, est) => `<div class="line"><span>${label}${est ? ' <span class="small muted">usual</span>' : ''}</span><button class="val-edit ${est ? 'est' : ''}" data-act="inc" data-ym="${r.ym}" data-k="${k}" aria-label="Change ${esc(label.replace(/<[^>]+>/g, ''))}">${v === null || v === undefined || v === '' ? '—' : money(v)}</button></div>`;
   const prevName = D.short(D.addMonths(r.ym, -1));
-  const hint = { auto: `${prevName} income − expenses − other`, live: 'from this month’s checklist', moved: 'moved at setup', set: 'set by you', noincome: `add ${prevName} income to estimate` }[r.kind] || '';
+  const hint = { auto: `${prevName} income − expenses − other${r.elevate ? ' + additional' : ''}`, live: 'from this month’s checklist', moved: 'moved at setup', set: 'set by you', noincome: `add ${prevName} income to estimate` }[r.kind] || '';
   const p = r.plan || {};
-  // ElevateEMS pay lands in that same month and goes into that month's savings
-  // (it is not a paycheck for next month).
-  const elev = r.elevate ? eline(`Additional income <span class="small muted">ElevateEMS → ${D.short(r.ym)} savings</span>`, r.elevate, 'elevate') : '';
-  const elevBtn = r.elevate && !p.elevateDone && r.ym <= D.addMonths(homeYm(), 0)
-    ? `<button class="btn small" data-act="elevate" data-ym="${r.ym}">ElevateEMS pay arrived → add ${money(r.elevate)} to savings</button>` : '';
+  // ElevateEMS pay is additional income in that same month (not a paycheck for next month).
+  const elev = r.elevate ? eline(`Additional income <span class="small muted">ElevateEMS</span>`, r.elevate, 'elevate') : '';
+  const elevBtn = '';
   return `<section class="mcard card ${r.current ? 'current' : ''}">
     <button class="plain" data-act="expand" data-ym="${r.ym}" data-open="1" aria-expanded="true">${head}</button>
     <div class="mbody">
@@ -501,7 +499,7 @@ function openPlan(ym) {
   openSheet(`<div class="sheet-head"><h2>${D.label(ym)}</h2><button class="x" data-act="close">×</button></div>
     <div class="two"><label class="field"><span class="label">Nick income</span><input id="p-nick" inputmode="decimal" value="${v(p.nick)}"></label>
     <label class="field"><span class="label">Bella income</span><input id="p-bella" inputmode="decimal" value="${v(p.bella)}"></label></div>
-    <label class="field"><span class="label">Additional income — ElevateEMS <span class="muted small">(class months; goes into ${D.name(ym)}’s savings, not next month’s income)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
+    <label class="field"><span class="label">Additional income — ElevateEMS <span class="muted small">(class months; lands in ${D.name(ym)}’s Additional income when you set it up)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
     <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
       <div class="add-row"><input id="p-oname" placeholder="What"><input id="p-oamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-oadd">Add</button></div></div>
@@ -677,14 +675,13 @@ function startDraft() {
     const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
     d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
     d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b }));
+    if (Number(plan.elevate) > 0) d.back.push({ id: newId(), name: 'ElevateEMS pay', amount: Number(plan.elevate), received: false });
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
   }
   for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Number(c.budget) || 0;
   d.nick = plan.nick ?? '';
   d.bella = plan.bella ?? '';
-  d.elevate = plan.elevate ?? '';
-  d.elevateToSavings = plan.elevateToSavings !== false;
   S.draft = d;
 }
 
@@ -702,7 +699,7 @@ function readDraftInputs() {
   if (v('#d-checking') !== undefined) d.checking = v('#d-checking');
   for (const c of H().categories) { const x = v(`#d-b-${c.id}`); if (x !== undefined) d.budgets[c.id] = num(x) || 0; }
   for (const h of d.held) { const x = v(`#d-h-${h.id}`); if (x !== undefined) h.amount = num(x) || 0; }
-  if (v('#d-nick') !== undefined) { d.nick = v('#d-nick'); d.bella = v('#d-bella'); d.elevate = v('#d-elevate'); d.elevateToSavings = true; }
+  if (v('#d-nick') !== undefined) { d.nick = v('#d-nick'); d.bella = v('#d-bella'); }
 }
 
 function viewSetup() {
@@ -748,7 +745,7 @@ function viewSetup() {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
       <div class="two"><label class="field"><span class="label">Nick</span><input id="d-nick" inputmode="decimal" value="${esc(d.nick)}"></label>
       <label class="field"><span class="label">Bella</span><input id="d-bella" inputmode="decimal" value="${esc(d.bella)}"></label></div>
-      <label class="field"><span class="label">Additional income — ElevateEMS <span class="small muted">(class months; goes into ${D.name(N)}’s savings)</span></span><input id="d-elevate" inputmode="decimal" value="${esc(d.elevate)}"></label>`;
+      <p class="small muted">ElevateEMS pay for ${D.name(N)} is under Additional income on the Bills & extras step.</p>`;
   } else {
     const M = draftMonth(d);
     const c = Calc.checklist(H(), M, N, S.purchases);
@@ -786,7 +783,7 @@ async function finishSetup(mode) {
   const actual = Number((H().savings || {}).actual) || 0;
   const pairs = [];
   const nv = x => (num(x) === null ? B.DEL : num(x));
-  pairs.push([['plans', N, 'nick'], nv(d.nick)], [['plans', N, 'bella'], nv(d.bella)], [['plans', N, 'elevate'], nv(d.elevate)], [['plans', N, 'elevateToSavings'], d.elevateToSavings]);
+  pairs.push([['plans', N, 'nick'], nv(d.nick)], [['plans', N, 'bella'], nv(d.bella)]);
   if (!plans[R] || plans[R].endBalance === undefined) pairs.push([['plans', R, 'endBalance'], actual]);
   await B.setMonth(N, M);
   await B.setMonthField(N, ['bills'], {});
@@ -1088,13 +1085,7 @@ const acts = {
     await setSavings(v, note || 'Updated balance');
     toast('Savings updated');
   },
-  elevate: async el => {
-    const ym = el.dataset.ym;
-    const amt = Number(H().plans[ym].elevate) || 0;
-    if (!(await ask(`Add ${money(amt)} ElevateEMS pay to savings?`, 'Add it'))) return;
-    await B.setH([[['plans', ym, 'elevateDone'], true]]);
-    await setSavings((Number(H().savings.actual) || 0) + amt, `ElevateEMS pay (${D.short(ym)})`, 'in');
-  },
+
   hysa: async el => {
     const v = Number(el.dataset.v);
     const Y = el.dataset.y;
