@@ -781,7 +781,7 @@ function openBucket(id) {
   S.sheet = 'bucket';
   openSheet(`<div class="sheet-head"><h2>${b.emoji ? esc(b.emoji) + ' ' : ''}${esc(b.name)}</h2><button class="x" data-act="close">×</button></div>
     <div class="line"><span>Balance</span><b class="big">${money(bal)}</b></div>
-    <div class="seg">${[['spend', 'Spend from it'], ['add', 'Add money'], ['move', 'Move']].map(([k, l]) => `<button class="${S.bkMode === k ? 'on' : ''}" data-act="bk-mode" data-v="${k}" data-id="${esc(id)}">${l}</button>`).join('')}</div>
+    <div class="seg">${[['add', 'Add money'], ['spend', 'Spend from it'], ['move', 'Move']].map(([k, l]) => `<button class="${S.bkMode === k ? 'on' : ''}" data-act="bk-mode" data-v="${k}" data-id="${esc(id)}">${l}</button>`).join('')}</div>
     <div class="two"><label class="field"><span class="label">Amount</span><input id="bk-amt" inputmode="decimal" placeholder="$"></label>
       ${S.bkMode === 'move'
         ? `<label class="field"><span class="label">Move to</span><select id="bk-to">${others.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></label>`
@@ -801,7 +801,7 @@ function openBucket(id) {
       <button class="btn ghost small danger" data-act="bk-del" data-id="${esc(id)}">Remove bucket</button>
     </details>
     <h3>History</h3>
-    ${hist.length ? hist.map(t => `<div class="line small"><span>${D.niceDay(t.date)} · ${esc(t.note || { fill: 'Monthly savings', spend: 'Spent', add: 'Added', move: 'Moved', adjust: 'Balance corrected', start: 'Starting balance', cover: 'Covered overspending' }[t.kind] || '')}</span><span class="${t.amount < 0 ? 'neg' : ''}">${t.amount > 0 ? '+' : ''}${money(t.amount)}</span></div>`).join('') : '<p class="muted small">Nothing yet.</p>'}`);
+    ${hist.length ? hist.map(t => `<div class="line small hist-row"><span>${D.niceDay(t.date)} · ${esc(t.note || { fill: 'Monthly savings', spend: 'Spent', add: 'Added', move: 'Moved', adjust: 'Balance corrected', start: 'Starting balance', cover: 'Covered overspending' }[t.kind] || '')}</span><span><span class="${t.amount < 0 ? 'neg' : ''}">${t.amount > 0 ? '+' : ''}${money(t.amount)}</span> <button class="x small" data-act="bk-tx-del" data-id="${esc(t.id)}" data-b="${esc(id)}" aria-label="Delete this entry">×</button></span></div>`).join('') : '<p class="muted small">Nothing yet.</p>'}`);
 }
 
 // Where money going into (or out of) savings lands. Positive: each bucket's
@@ -1495,7 +1495,7 @@ const acts = {
     openAllocate(v, async tx => { if (tx.length) { await addBucketTx(tx); toast('Buckets match your savings again'); } }, v > 0 ? 'Assigned from savings' : 'Matched to savings balance');
   },
   'go-savings': () => { location.hash = '#/savings'; },
-  bucket: el => { S.bkMode = S.bkMode || 'spend'; openBucket(el.dataset.id); },
+  bucket: el => { S.bkMode = S.bkMode || 'add'; openBucket(el.dataset.id); },
   'bk-mode': el => { S.bkMode = el.dataset.v; openBucket(el.dataset.id); },
   'bk-save': async el => {
     const id = el.dataset.id;
@@ -1509,7 +1509,8 @@ const acts = {
       const to = $('#bk-to') ? $('#bk-to').value : null;
       const toId = to || (H().buckets || []).find(b => b.id !== id)?.id;
       if (!toId) return;
-      await addBucketTx([{ b: id, amount: -amt, kind: 'move', note: note || `Moved to ${bucketById(toId).name}` }, { b: toId, amount: amt, kind: 'move', note: note || `Moved from ${bucketById(id).name}` }]);
+      const pair = newId();
+      await addBucketTx([{ b: id, amount: -amt, kind: 'move', pair, note: note || `Moved to ${bucketById(toId).name}` }, { b: toId, amount: amt, kind: 'move', pair, note: note || `Moved from ${bucketById(id).name}` }]);
       toast(`Moved ${money(amt)}`);
     } else if (S.bkMode === 'add') {
       await addBucketTx([{ b: id, amount: amt, kind: 'add', note, date }]);
@@ -1520,6 +1521,23 @@ const acts = {
       await setSavings(actual - amt, note || `Spent from ${bucketById(id).name}`, 'out');
       toast(`${money(amt)} from ${bucketById(id).name}`);
     }
+  },
+  // Undo a bucket entry. Spending/adding also changed the savings total, so
+  // that's put back too; a move removes both halves.
+  'bk-tx-del': async el => {
+    const all = H().bucketTx || [];
+    const t = all.find(x => x.id === el.dataset.id);
+    if (!t) return;
+    const what = { spend: 'this spending', add: 'this added money', move: 'this move (both buckets)' }[t.kind] || 'this entry';
+    const extra = t.kind === 'spend' ? ` ${money(-t.amount)} goes back into savings.` : t.kind === 'add' ? ` Savings goes down ${money(t.amount)}.` : '';
+    if (!(await ask(`Delete ${what}?${extra}`, 'Delete'))) return;
+    const gone = t.pair ? all.filter(x => x.pair === t.pair).map(x => x.id) : [t.id];
+    await B.setH([[['bucketTx'], all.filter(x => !gone.includes(x.id))]]);
+    const actual = Number(H().savings.actual) || 0;
+    if (t.kind === 'spend' || t.kind === 'add') await setSavings(round2(actual - t.amount), `Undid: ${t.note || t.kind}`, 'undo');
+    toast('Deleted');
+    S.bkMode = S.bkMode || 'add';
+    setTimeout(() => openBucket(el.dataset.b), 50);
   },
   'bk-del': async el => {
     const b = bucketById(el.dataset.id);

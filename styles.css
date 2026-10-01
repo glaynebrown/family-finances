@@ -399,3 +399,4 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .tap-hint { margin-top: 8px; font-weight: 700; color: var(--save); }
 .bucket { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; transition: transform .15s ease; }
 .bucket.dragging { transition: none; position: relative; z-index: 5; box-shadow: 0 12px 30px rgba(60, 40, 20, .25); }
+.hist-row > span:last-child { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
