@@ -391,7 +391,7 @@ function billsSections() {
       return `<div class="check-row ${b.paid ? 'done' : ''}">
         <button class="box ${b.paid ? 'on' : ''}" data-act="bill" data-id="${esc(b.id)}" aria-label="Paid">${b.paid ? '✓' : ''}</button>
         <span class="day">${D.ordinal(b.day)}</span>
-        <span class="grow">${esc(b.name)} ${extra}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
+        <span class="grow">${esc(b.name)} ${extra}${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
         <b>${money(b.amountNow)}</b>
       </div>`;
     }).join('')}
@@ -1231,6 +1231,7 @@ function viewSettings() {
       <input class="grow" data-ch="bill" data-id="${esc(b.id)}" data-f="name" value="${esc(b.name)}" aria-label="Name">
       <input class="mini" data-ch="bill" data-id="${esc(b.id)}" data-f="amount" inputmode="decimal" value="${esc(b.amount)}" aria-label="Amount">
       <button class="x small" data-act="bill-del" data-id="${esc(b.id)}" aria-label="Remove">×</button></div>
+      <div class="line small autopay"><span class="muted">${b.autopay === false ? 'You pay it yourself — check it off on Overview' : 'Autopay — checks itself off on its due day'}</span><button class="switch ${b.autopay === false ? '' : 'on'}" data-act="autopay" data-id="${esc(b.id)}" role="switch" aria-checked="${b.autopay !== false}" aria-label="Autopay"><i></i></button></div>
       ${(b.changes || []).map((ch, i) => `<div class="small muted change">→ ${money(ch.amount)} starting ${D.label(ch.from)} <button class="linkish small" data-act="chg-del" data-id="${esc(b.id)}" data-i="${i}">remove</button></div>`).join('')}
       ${(h.helpers || []).filter(x => x.bill === b.id).map(x => `<div class="edit-row share-edit"><span class="small muted">Shared:</span>
         <input class="grow" data-ch="help" data-id="${esc(x.id)}" data-f="name" value="${esc(x.name)}" aria-label="Who">
@@ -1493,9 +1494,14 @@ const acts = {
     const b = H().bills.find(x => x.id === el.dataset.id);
     const st = Calc.billStatus(S.months[ym], b, ym);
     const paid = !st.paid;
-    // If the tap lands where the due date would have it anyway, go back to
-    // automatic (no "set by hand" note). Otherwise remember it was set by hand,
-    // paid on its due date if that's passed (so checking isn't charged twice).
+    // Paid-by-hand bills: checked = paid today; unchecked = back to waiting.
+    if (b.autopay === false) {
+      await B.setMonthField(ym, ['bills', b.id], paid ? { paid: true, at: Date.now(), manual: true } : B.DEL);
+      return;
+    }
+    // Autopay: if the tap lands where the due date would have it anyway, go back
+    // to automatic (no "set by hand" note). Otherwise remember it was set by
+    // hand, paid on its due date if that's passed (so checking isn't charged twice).
     const auto = Date.now() >= st.due;
     await B.setMonthField(ym, ['bills', b.id], paid === auto ? B.DEL : { paid, at: Math.min(Date.now(), st.due), manual: true });
   },
@@ -1803,6 +1809,10 @@ const acts = {
     const day = Math.min(31, Math.max(1, parseInt($('#bill-day').value, 10) || 1));
     if (!name || !amount) { toast('Add a name and an amount'); return; }
     const bills = [...H().bills, { id: newId(), name, amount, day, changes: [] }].sort((a, b) => a.day - b.day);
+    await B.setH([[['bills'], bills]]);
+  },
+  autopay: async el => {
+    const bills = H().bills.map(b => (b.id === el.dataset.id ? { ...b, autopay: b.autopay === false } : b));
     await B.setH([[['bills'], bills]]);
   },
   'bill-del': async el => {

@@ -409,3 +409,5 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .alloc-sum.left { background: var(--over-bg); color: var(--over); }
 .alloc-sum.over { background: #FBE3DE; color: var(--neg); }
 .alloc-sum select { flex: 1; min-width: 140px; padding: 7px 10px; }
+.autopay { padding: 2px 0 4px 60px; }
+.autopay .switch { transform: scale(.8); transform-origin: right center; }

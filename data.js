@@ -131,7 +131,10 @@ const Calc = (() => {
   function billStatus(M, bill, ym, now = Date.now()) {
     const due = D.dueTime(ym, bill.day);
     const o = M && M.bills && M.bills[bill.id];
-    if (o && o.manual) return { paid: !!o.paid, at: o.at || due, manual: true, due, late: !o.paid && now >= due };
+    // Bills paid by hand (autopay off) never check themselves off.
+    const self = bill.autopay === false;
+    if (o && o.manual) return { paid: !!o.paid, at: o.at || due, manual: !self, self, due, late: !o.paid && now >= due };
+    if (self) return { paid: false, at: due, manual: false, self, due, late: now >= due };
     return { paid: now >= due, at: due, manual: false, due, late: false };
   }
 
