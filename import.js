@@ -128,6 +128,19 @@ const Imp = (() => {
       };
       const done = ((months[D.ymOf(rec.date)] || {}).importedKeys || []).includes(key);
       if (done) { row.status = 'dup'; return row; }
+      // Paychecks that land in checking (Settings → Features): a deposit that
+      // isn't a transfer, refund or Venmo. Asked once, then remembered.
+      const deposit = rec.credit && !isRefund && !/transfer (from|to)/i.test(rec.desc) && (/deposit|ach credit|direct dep/i.test(rec.group) || /^deposit\b/i.test(rec.desc));
+      if (deposit && (H.features || {}).payInChecking) {
+        const pr = findRule(rules, mkey);
+        row.payCandidate = true;
+        row.amount = rec.amount;
+        if (pr && pr.action === 'pay') { row.cat = 'pay'; row.reason = 'Paycheck (from your rule)'; return row; }
+        if (pr && pr.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = 'Skipped by your rule'; return row; }
+        row.reason = 'Money in — is this a paycheck?';
+        row.remember = true;
+        return row;
+      }
       if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
       if (venmo) { row.reason = rec.credit ? 'Venmo in — your call' : 'Venmo — your call'; row.amount = rec.credit ? -rec.amount : rec.amount; return row; }
       if (!isBuy && !isRefund) { row.status = 'skip'; row.cat = 'skip'; row.reason = rec.credit ? 'Money in (transfer/deposit)' : 'Transfer or payment'; return row; }
@@ -151,7 +164,7 @@ const Imp = (() => {
     });
     // Rows the categories list doesn't know (e.g. a deleted category) need a pick.
     const ids = new Set((H.categories || []).map(c => c.id));
-    for (const r of rows) if (r.cat && !['skip', 'uncat'].includes(r.cat) && !ids.has(r.cat)) { r.cat = ''; }
+    for (const r of rows) if (r.cat && !['skip', 'uncat', 'pay'].includes(r.cat) && !ids.has(r.cat)) { r.cat = ''; }
     const dates = recs.map(r => r.post || r.date).sort();
     return { rows, from: dates[0], through: dates[dates.length - 1] };
   }

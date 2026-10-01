@@ -865,7 +865,7 @@ function pickImportFile() {
       if (last && res.from && res.from > D.dayStr(new Date(new Date(last + 'T12:00').getTime() + 864e5))) {
         gap = `Your last import went through ${D.niceDay(last)}, but this file starts ${D.niceDay(res.from)}. A few days might be missing — download a longer date range to be safe.`;
       }
-      for (const r of res.rows) r.firstNeeds = r.status === 'review' && (!r.cat || r.ask || r.venmo);
+      for (const r of res.rows) r.firstNeeds = r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')));
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       location.hash = '#/import';
     } catch (e) { console.error(e); toast(e.message || 'Couldn’t read that file'); }
@@ -879,6 +879,14 @@ const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
 
 function impRow(r) {
+  if (r.payCandidate) {
+    return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
+      <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
+      <div class="small muted">${esc(r.reason)}</div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Paycheck?"><option value="" ${!r.cat ? 'selected' : ''}>Is this a paycheck?</option><option value="pay" ${r.cat === 'pay' ? 'selected' : ''}>Yes — a paycheck</option><option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
+      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always ${r.cat === 'pay' ? 'treat this as a paycheck' : 'skip this'}</label>` : ''}
+    </div>`;
+  }
   const needs = !r.cat && !r.splits;
   const tagChips = r.tags.map(t => `<span class="tag">${esc(t)} <button class="chip-x" data-act="imp-untag" data-i="${r.i}" data-v="${esc(t)}" aria-label="Remove tag">×</button></span>`).join('');
   const split = r.splits ? `<div class="splits">${r.splits.map((sp, j) => `<div class="edit-row"><input class="mini" data-ch="imp-split-amt" data-i="${r.i}" data-j="${j}" inputmode="decimal" value="${sp.amount}"><select data-ch="imp-split-cat" data-i="${r.i}" data-j="${j}">${catOptions(sp.cat)}</select><select class="split-tag" data-ch="imp-split-tag" data-i="${r.i}" data-j="${j}" aria-label="Tag"><option value="">Tag</option>${(H().tags || []).map(t => `<option ${sp.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>${j ? `<button class="x small" data-act="imp-split-del" data-i="${r.i}" data-j="${j}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
@@ -905,7 +913,7 @@ function viewImport() {
   const skipped = live.filter(r => r.status === 'skip');
   const first = review.filter(r => r.firstNeeds);
   const rest = review.filter(r => !r.firstNeeds);
-  const open = review.filter(r => !r.cat && !r.splits).length;
+  const open = review.filter(r => !r.cat && !r.splits && !r.payCandidate).length + review.filter(r => r.payCandidate && !r.cat).length;
   return `<header class="hero small-hero"><a class="back" href="#/home" data-act="imp-cancel">‹ Cancel</a><h1>Import</h1></header>
   <section class="card">
     <div class="line"><span><b>${D.niceDay(I.from)} – ${D.niceDay(I.through)}</b></span><span class="small muted">${esc(I.name)}</span></div>
@@ -916,14 +924,14 @@ function viewImport() {
   ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
-  ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo ones are skipped).</p>` : ''}
+  ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits are skipped).</p>` : ''}
   <section class="card">
     <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
       <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" placeholder="from your Navy Federal app" value="${esc(I.bal || '')}"></span></label>
     <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
   </section>
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}</button>
   </div>`;
 }
 
@@ -933,12 +941,18 @@ async function saveImport() {
   const purchases = [];
   const keysByMonth = {};
   const rules = { ...(H().rules || {}) };
+  const pays = [];
   let latest = (H().imports || {}).through || '';
   for (const r of I.rows) {
     if (r.status === 'dup') continue;
     const ym = D.ymOf(r.date);
     (keysByMonth[ym] = keysByMonth[ym] || []).push(r.key);
     if (r.post && r.post > latest) latest = r.post;
+    if (r.payCandidate) {
+      if (r.remember && r.cat) rules[r.ruleKey] = { action: r.cat === 'pay' ? 'pay' : 'skip', name: r.name };
+      if (r.cat === 'pay') pays.push(r);
+      continue;
+    }
     if (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits)) {
       if (r.remember && r.cat === 'skip' && !r.ask) rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
@@ -955,6 +969,21 @@ async function saveImport() {
     if (r.remember && !r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits) rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
   }
   if (purchases.length) await B.savePurchases(purchases);
+  // Each paycheck checks off the next one expected that month, with its real
+  // amount (overtime and all); if they've all arrived, it's added to the list.
+  const byMonth = {};
+  for (const r of pays.sort((a, b) => (a.date < b.date ? -1 : 1))) (byMonth[D.ymOf(r.date)] = byMonth[D.ymOf(r.date)] || []).push(r);
+  for (const ym in byMonth) {
+    const list = [...((S.months[ym] || {}).incoming || [])].map(x => ({ ...x }));
+    for (const r of byMonth[ym]) {
+      const at = new Date(`${r.post || r.date}T12:00`).getTime();
+      const slot = list.find(x => !x.received);
+      if (slot) Object.assign(slot, { amount: r.amount, received: true, receivedAt: at, fromImport: true });
+      else list.push({ id: newId(), name: `Paycheck ${list.length + 1}`, amount: r.amount, received: true, receivedAt: at, fromImport: true });
+    }
+    await B.setMonthField(ym, ['incoming'], list);
+    await syncPayPlan(list, ym);
+  }
   for (const ym in keysByMonth) {
     const had = (S.months[ym] || {}).importedKeys || [];
     await B.setMonthField(ym, ['importedKeys'], [...new Set([...had, ...keysByMonth[ym]])]);
@@ -965,7 +994,7 @@ async function saveImport() {
   S.imp = null;
   S.page = 'budgets';
   location.hash = '#/home';
-  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
+  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${pays.length ? ` · ${pays.length} paycheck${pays.length === 1 ? '' : 's'}` : ''}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
 }
 
 /* ---------- Month setup (the Checklist, step by step) ---------- */
@@ -1203,7 +1232,7 @@ function viewSettings() {
       : 'Tap + Log after each purchase.'}</p>
     ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
       ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
-        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option><option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
+        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
         <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
   </section>
 
@@ -1882,7 +1911,7 @@ const changes = {
     const rules = { ...(H().rules || {}) };
     const old = rules[el.dataset.k] || {};
     const v = el.value;
-    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : { ...old, action: 'cat', cat: v };
+    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
   alloc: el => { S.alloc.pick[el.dataset.id] = num(el.value) || 0; redrawAlloc(); },
