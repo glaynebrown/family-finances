@@ -153,6 +153,7 @@ const route = () => { const r = location.hash.replace(/^#\/?/, '').split('/')[0]
 function render(force) {
   // Don't redraw under someone's fingers: wait until they leave the field / close the sheet.
   const a = document.activeElement;
+  if (S.drag) { S.pending = true; return; }
   if (!force && (a && view.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'checkbox') || (sheetOpen() && S.sheet !== 'soft')) {
     S.pending = true;
     return;
@@ -161,7 +162,7 @@ function render(force) {
   if (!H()) return;
   applyLook();
   const r = route();
-  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings, import: viewImport };
+  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings, import: viewImport, savings: viewSavings };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
   view.innerHTML = fn();
@@ -202,7 +203,7 @@ document.addEventListener('focusout', e => {
 function drawTabs(r) {
   const t = $('#tabs');
   t.hidden = false;
-  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'review' && r === 'setup') ? 'on' : '');
+  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'year' && r === 'savings') || (id === 'review' && r === 'setup') ? 'on' : '');
   t.innerHTML = `<a href="#/review" class="${on('review')}">${icons.review}<span>Review</span></a>`
     + `<a href="#/home" class="money ${on('home')}" aria-label="Home">${icons.home}</a>`
     + `<a href="#/year" class="${on('year')}">${icons.year}<span>Year</span></a>`;
@@ -475,15 +476,15 @@ function viewYear() {
   const allOpen = shown.length && shown.some(isOpen);
   return `
   <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
-  <section class="card">
+  <section class="card ${bucketsOn() && showActual ? 'tap-card' : ''}" ${bucketsOn() && showActual ? 'role="button" tabindex="0" data-act="go-savings"' : ''}>
     <div class="row between"><span class="label">Savings${showActual ? ' right now' : ''}</span><button class="linkish small" data-act="savings">Update</button></div>
     <div class="big-num">${money(showActual ? actual : proj || 0)}</div>
     ${bar}
     <div class="small muted">${proj !== null ? `On track for <b class="${proj >= goalMin ? 'save-good' : ''}">${money(proj)}</b> by Dec 31` : 'Add income for the months ahead to see a projection'}
       ${proj === null || bucketsOn() ? '' : (proj >= goalMax ? ' — past your goal! 🎉' : proj >= goalMin ? ' — past the minimum.' : ` — ${money(goalMin - proj)} short of the minimum.`)}</div>
     ${Number(sv.hysa) && !bucketsOn() ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
+    ${bucketsOn() && showActual ? `<div class="small tap-hint">See what it’s set aside for ›</div>` : ''}
   </section>
-  ${bucketsOn() && showActual ? bucketsSection(actual) : ''}
   <div class="year-head-row"><h2 class="year-head">Projected Savings</h2>
   ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${shown.map(r => r.ym).join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
   ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : 'Prior data kept in Google Sheets'}</p>` : ''}
@@ -737,23 +738,32 @@ function bucketsSection(actual) {
   const list = h.buckets || [];
   const sum = round2(list.reduce((a, b) => a + bal[b.id], 0));
   const unassigned = round2(actual - sum);
-  return `<div class="year-head-row"><h2 class="year-head">Savings buckets</h2></div>
-  <section class="buckets">
+  return `<section class="buckets">
     ${list.map(b => {
       const goal = Number(b.goal) || 0;
       const full = goal && bal[b.id] >= goal - 0.004;
       const pct = goal ? Math.min(100, (bal[b.id] / goal) * 100) : 0;
       const fill = b.monthly ? `${money(b.monthly)}/mo` : Number(b.pct) ? `${b.pct}%` : '';
       return `<div class="bucket card" role="button" tabindex="0" data-act="bucket" data-id="${esc(b.id)}">
-        <div class="row between"><b>${esc(b.name)}</b><span><b>${money(bal[b.id])}</b> <span class="muted small">/ ${money(goal)}</span></span></div>
+        <div class="row between"><span class="cat-name">${b.emoji ? `<span class="emoji">${esc(b.emoji)}</span>` : ''}${esc(b.name)}</span><span><b>${money(bal[b.id])}</b> <span class="muted small">/ ${money(goal)}</span></span></div>
         <div class="bar save-bar"><i style="width:${pct}%"></i></div>
         <div class="small muted">${full ? '✓ Full' : `${money(Math.max(0, goal - bal[b.id]))} to go`}${fill ? ` · fills ${fill}` : ''}${b.note ? ` · ${esc(b.note)}` : ''}</div>
       </div>`;
     }).join('')}
     ${Math.abs(unassigned) > 0.004 ? `<div class="card unassigned"><div class="row between"><b>${unassigned > 0 ? 'Not assigned' : 'Buckets are over your savings by'}</b><b>${money(Math.abs(unassigned))}</b></div>
-      <p class="small muted">${unassigned > 0 ? 'Savings that isn’t in a bucket yet. Tap a bucket → Add money to give it a job.' : 'The buckets add up to more than your savings balance. Check a bucket’s balance or update your savings.'}</p></div>` : ''}
+      <p class="small muted">${unassigned > 0 ? 'Savings that isn’t in a bucket yet.' : 'The buckets add up to more than your savings balance.'}</p>
+      <button class="btn small" data-act="assign" data-v="${unassigned}">${unassigned > 0 ? 'Give it a job' : 'Take it from…'}</button></div>` : ''}
+    <p class="small muted center">Press and hold a bucket to drag it into a new order.</p>
     <button class="linkish small add-link" data-act="bucket-new">+ Add bucket</button>
   </section>`;
+}
+
+function viewSavings() {
+  const actual = Number((H().savings || {}).actual) || 0;
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/year">‹ Year</a><h1>Savings</h1></header>
+  <section class="card"><div class="row between"><span class="label">Savings right now</span><button class="linkish small" data-act="savings">Update</button></div>
+    <div class="big-num">${money(actual)}</div></section>
+  ${bucketsSection(actual)}`;
 }
 
 const bucketById = id => (H().buckets || []).find(b => b.id === id);
@@ -769,7 +779,7 @@ function openBucket(id) {
   const hist = (H().bucketTx || []).filter(t => t.b === id).slice().reverse().slice(0, 40);
   const others = (H().buckets || []).filter(x => x.id !== id);
   S.sheet = 'bucket';
-  openSheet(`<div class="sheet-head"><h2>${esc(b.name)}</h2><button class="x" data-act="close">×</button></div>
+  openSheet(`<div class="sheet-head"><h2>${b.emoji ? esc(b.emoji) + ' ' : ''}${esc(b.name)}</h2><button class="x" data-act="close">×</button></div>
     <div class="line"><span>Balance</span><b class="big">${money(bal)}</b></div>
     <div class="seg">${[['spend', 'Spend from it'], ['add', 'Add money'], ['move', 'Move']].map(([k, l]) => `<button class="${S.bkMode === k ? 'on' : ''}" data-act="bk-mode" data-v="${k}" data-id="${esc(id)}">${l}</button>`).join('')}</div>
     <div class="two"><label class="field"><span class="label">Amount</span><input id="bk-amt" inputmode="decimal" placeholder="$"></label>
@@ -780,7 +790,7 @@ function openBucket(id) {
     <p class="small muted">${S.bkMode === 'spend' ? 'Money that left savings. Lowers this bucket and your savings — its % next month stays the same.' : S.bkMode === 'add' ? 'New money into savings for this bucket (raises your savings too).' : 'Moves money between buckets. Your savings total doesn’t change.'}</p>
     <button class="btn full" data-act="bk-save" data-id="${esc(id)}">${S.bkMode === 'spend' ? 'Save spending' : S.bkMode === 'add' ? 'Add it' : 'Move it'}</button>
     <details class="small"><summary>Edit bucket (name, goal, %)</summary>
-      <label class="field"><span class="label">Name</span><input data-ch="bk" data-id="${esc(id)}" data-f="name" value="${esc(b.name)}"></label>
+      <div class="edit-row"><input class="emoji-in" data-ch="bk" data-id="${esc(id)}" data-f="emoji" value="${esc(b.emoji || '')}" placeholder="🙂" aria-label="Emoji"><input class="grow" data-ch="bk" data-id="${esc(id)}" data-f="name" value="${esc(b.name)}" aria-label="Name"></div>
       <div class="three">
         <label class="field"><span class="label">Goal</span><input data-ch="bk" data-id="${esc(id)}" data-f="goal" inputmode="decimal" value="${esc(b.goal)}"></label>
         <label class="field"><span class="label">% of extra</span><input data-ch="bk" data-id="${esc(id)}" data-f="pct" inputmode="decimal" value="${esc(b.pct || 0)}"></label>
@@ -797,9 +807,9 @@ function openBucket(id) {
 // Where money going into (or out of) savings lands. Positive: each bucket's
 // % (up to its goal) is filled in, and anything left over is hers to place.
 // Negative: she picks which buckets cover it.
-function openAllocate(amount, done) {
+function openAllocate(amount, done, note) {
   const sp = amount > 0 ? Calc.splitIntoBuckets(H(), amount) : { add: {}, extra: round2(-amount), bal: Calc.bucketBalances(H()) };
-  S.alloc = { amount, auto: sp.add, toPlace: sp.extra, pick: {}, done };
+  S.alloc = { amount, auto: sp.add, toPlace: sp.extra, pick: {}, done, note };
   S.sheet = 'alloc';
   openSheet(allocHtml());
 }
@@ -1254,6 +1264,75 @@ function shrinkImage(file) {
   });
 }
 
+/* ---------- press-and-hold to reorder savings buckets ---------- */
+
+(() => {
+  let hold = null;
+  const GAP = 10;
+  const point = e => (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+  function begin(item, y) {
+    const items = [...item.parentElement.querySelectorAll('.bucket[data-id]')];
+    const idx = items.indexOf(item);
+    const h = item.getBoundingClientRect().height + GAP;
+    S.drag = { item, items, idx, target: idx, startY: y, h };
+    item.classList.add('dragging');
+    if (navigator.vibrate) navigator.vibrate(10);
+  }
+  function move(y) {
+    const d = S.drag;
+    const dy = y - d.startY;
+    d.item.style.transform = `translateY(${dy}px) scale(1.02)`;
+    d.target = Math.max(0, Math.min(d.items.length - 1, d.idx + Math.round(dy / d.h)));
+    d.items.forEach((el, j) => {
+      if (el === d.item) return;
+      let shift = 0;
+      if (j > d.idx && j <= d.target) shift = -d.h;
+      if (j < d.idx && j >= d.target) shift = d.h;
+      el.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+  }
+  async function end() {
+    const d = S.drag;
+    S.drag = null;
+    d.items.forEach(el => { el.style.transform = ''; el.classList.remove('dragging'); });
+    // Swallow the click that follows the drop so the bucket doesn't open.
+    const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 400);
+    if (d.target !== d.idx) {
+      const list = [...(H().buckets || [])];
+      const [moved] = list.splice(d.idx, 1);
+      list.splice(d.target, 0, moved);
+      await B.setH([[['buckets'], list]]);
+    } else render();
+  }
+  function down(e) {
+    const item = e.target.closest('.bucket[data-id]');
+    if (!item || (e.button !== undefined && e.button > 0)) return;
+    const p = point(e);
+    hold = { x: p.clientX, y: p.clientY, timer: setTimeout(() => { begin(item, hold.y); }, 400) };
+  }
+  function moved(e) {
+    if (!hold) return;
+    const p = point(e);
+    if (S.drag) { e.preventDefault(); move(p.clientY); return; }
+    if (Math.abs(p.clientY - hold.y) > 8 || Math.abs(p.clientX - hold.x) > 8) { clearTimeout(hold.timer); hold = null; }
+  }
+  function up() {
+    if (!hold) return;
+    clearTimeout(hold.timer);
+    hold = null;
+    if (S.drag) end();
+  }
+  document.addEventListener('touchstart', down, { passive: true });
+  document.addEventListener('touchmove', moved, { passive: false });
+  document.addEventListener('touchend', up);
+  document.addEventListener('touchcancel', up);
+  document.addEventListener('mousedown', e => { if (!('ontouchstart' in window)) down(e); });
+  document.addEventListener('mousemove', e => { if (!('ontouchstart' in window)) moved(e); });
+  document.addEventListener('mouseup', () => { if (!('ontouchstart' in window)) up(); });
+})();
+
 /* ---------- taps ---------- */
 
 const acts = {
@@ -1410,6 +1489,12 @@ const acts = {
     if (bucketsOn() && (H().buckets || []).length) openAllocate(v, finish); else await finish();
   },
 
+  // Line the buckets back up with the savings total (the total doesn't change).
+  assign: el => {
+    const v = Number(el.dataset.v);
+    openAllocate(v, async tx => { if (tx.length) { await addBucketTx(tx); toast('Buckets match your savings again'); } }, v > 0 ? 'Assigned from savings' : 'Matched to savings balance');
+  },
+  'go-savings': () => { location.hash = '#/savings'; },
   bucket: el => { S.bkMode = S.bkMode || 'spend'; openBucket(el.dataset.id); },
   'bk-mode': el => { S.bkMode = el.dataset.v; openBucket(el.dataset.id); },
   'bk-save': async el => {
@@ -1461,8 +1546,9 @@ const acts = {
     const A = S.alloc;
     const out = A.amount < 0;
     const tx = [];
-    for (const id in A.auto) if (A.auto[id]) tx.push({ b: id, amount: A.auto[id], kind: 'fill' });
-    for (const id in A.pick) { const v = Number(A.pick[id]) || 0; if (v) tx.push({ b: id, amount: out ? -Math.abs(v) : v, kind: out ? 'cover' : 'fill' }); }
+    const note = A.note ? { note: A.note } : {};
+    for (const id in A.auto) if (A.auto[id]) tx.push({ b: id, amount: A.auto[id], kind: 'fill', ...note });
+    for (const id in A.pick) { const v = Number(A.pick[id]) || 0; if (v) tx.push({ b: id, amount: out ? -Math.abs(v) : v, kind: out ? 'cover' : 'fill', ...note }); }
     const done = A.done;
     S.alloc = null;
     closeSheet();
@@ -1526,7 +1612,7 @@ const acts = {
     openSheet(`<div class="sheet-head"><h2>Savings balance</h2><button class="x" data-act="close">×</button></div>
       <p class="muted">What’s in savings right now?</p>
       <label class="amount"><span>$</span><input id="s-amt" inputmode="decimal" value="${esc(H().savings.actual)}"></label>
-      <label class="field"><span class="label">Note <span class="small muted">(optional)</span></span><input id="s-note" placeholder="e.g. paid ourselves from ElevateEMS"></label>
+      <label class="field"><span class="label">Note <span class="small muted">(optional)</span></span><input id="s-note"></label>
       <div class="row end sheet-foot"><button class="btn" data-act="savings-save">Save</button></div>`);
   },
   'savings-save': async () => {

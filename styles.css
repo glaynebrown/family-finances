@@ -395,3 +395,7 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .switch i { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .2s; }
 .switch.on { background: var(--save); }
 .switch.on i { left: 23px; }
+.tap-card { cursor: pointer; }
+.tap-hint { margin-top: 8px; font-weight: 700; color: var(--save); }
+.bucket { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; transition: transform .15s ease; }
+.bucket.dragging { transition: none; position: relative; z-index: 5; box-shadow: 0 12px 30px rgba(60, 40, 20, .25); }
