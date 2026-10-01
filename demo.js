@@ -62,6 +62,12 @@ const Demo = (() => {
       emit();
       return Promise.resolve(id);
     },
+    savePurchases(list) {
+      for (const p of list) st.purchases.push({ ...clone(p), id: p.id || newId() });
+      emit();
+      return Promise.resolve();
+    },
+    loadPurchases() { return Promise.resolve([]); }, // sample mode keeps everything live
     deletePurchase(id) { st.purchases = st.purchases.filter(x => x.id !== id); emit(); return Promise.resolve(); },
     setWallpaper(m, data) { if (data) st.wallpapers[m] = data; else delete st.wallpapers[m]; emit(); return Promise.resolve(); },
     reset() { localStorage.removeItem(KEY); location.reload(); },

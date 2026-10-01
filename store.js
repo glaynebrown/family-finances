@@ -89,7 +89,9 @@ const Store = (() => {
       s.forEach(d => { out[d.id] = d.data(); });
       cbs.months(out);
     }, err('months')));
-    unsubs.push(sub('purchases').onSnapshot(s => cbs.purchases(s.docs.map(d => ({ id: d.id, ...d.data() }))), err('purchases')));
+    // Only recent purchases stay live (keeps daily reads small as the years add
+    // up); older months are fetched on demand with loadPurchases().
+    unsubs.push(sub('purchases').where('date', '>=', cbs.since).onSnapshot(s => cbs.purchases(s.docs.map(d => ({ id: d.id, ...d.data() }))), err('purchases')));
     unsubs.push(sub('wallpapers').onSnapshot(s => {
       const out = {};
       s.forEach(d => { out[d.id] = d.get('data'); });
@@ -114,12 +116,26 @@ const Store = (() => {
     const ref = id ? sub('purchases').doc(id) : sub('purchases').doc();
     return ref.set(rest).then(() => ref.id);
   }
+  // Many at once (an import): one batch per 400 writes.
+  async function savePurchases(list) {
+    for (let i = 0; i < list.length; i += 400) {
+      const batch = db.batch();
+      for (const p of list.slice(i, i + 400)) {
+        const { id, ...rest } = p;
+        batch.set(id ? sub('purchases').doc(id) : sub('purchases').doc(), rest);
+      }
+      await batch.commit();
+    }
+  }
+  // Purchases dated from <= date < to (one-time read, for paging back on Review).
+  const loadPurchases = (from, to) => sub('purchases').where('date', '>=', from).where('date', '<', to).get()
+    .then(s => s.docs.map(d => ({ id: d.id, ...d.data() })));
   const deletePurchase = id => sub('purchases').doc(id).delete();
   const setWallpaper = (m, data) => (data ? sub('wallpapers').doc(String(m)).set({ data }) : sub('wallpapers').doc(String(m)).delete());
 
   return {
     configured: true, DEL, onUser, signUp, signIn, reset, signOut, myHousehold, createHousehold,
-    joinHousehold, open, stop, setH, setMonth, setMonthField, savePurchase, deletePurchase, setWallpaper,
+    joinHousehold, open, stop, setH, setMonth, setMonthField, savePurchase, savePurchases, loadPurchases, deletePurchase, setWallpaper,
     uid: () => auth.currentUser && auth.currentUser.uid,
   };
 })();

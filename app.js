@@ -327,6 +327,7 @@ async function saveLog() {
   const before = Calc.checklist(H(), S.months[D.ymOf(rec.date)], D.ymOf(rec.date), S.purchases).cats.find(c => c.id === rec.cat);
   closeSheet();
   await B.savePurchase(rec);
+  if (rec.id && rec.date < S.since) { S.older = S.older.map(p => (p.id === rec.id ? { ...rec } : p)); mergePurchases(); render(); }
   const c = catById(rec.cat);
   const ym = D.ymOf(rec.date);
   const after = Calc.checklist(H(), S.months[ym], ym, S.purchases.filter(p => p.id !== rec.id).concat([{ ...rec, id: rec.id || 'new' }])).cats.find(x => x.id === rec.cat);
@@ -1145,6 +1146,7 @@ const acts = {
     const id = S.log.id;
     closeSheet();
     await B.deletePurchase(id);
+    S.older = S.older.filter(p => p.id !== id); mergePurchases(); render();
     toast('Deleted');
   },
 
@@ -1309,7 +1311,7 @@ const acts = {
     if (v > 0) { confetti(); toast(`${money(v)} to the HYSA 🎉 Here’s ${Number(Y) + 1}.`); }
   },
 
-  'bd-m': el => { S.bdYm = D.addMonths(S.bdYm || homeYm(), Number(el.dataset.d)); render(); },
+  'bd-m': el => { S.bdYm = D.addMonths(S.bdYm || homeYm(), Number(el.dataset.d)); render(); ensureLoaded(S.bdYm).catch(e => console.warn('older purchases', e)); },
   'bd-tab': el => { S.bdTab = el.dataset.v; render(); },
   'bd-item': el => openItem(el.dataset.key),
   'bd-go': el => { S.bdYm = el.dataset.ym; },
@@ -1577,10 +1579,34 @@ function householdScreen(msg = '') {
 
 /* ---------- boot ---------- */
 
+// Purchases: the live window (last 18 months) plus any older months fetched
+// while paging back on Review.
+const LIVE_MONTHS = 18;
+S.since = `${D.addMonths(D.curYm(), -LIVE_MONTHS)}-01`;
+S.loadedFrom = S.since;
+S.live = [];
+S.older = [];
+function mergePurchases() {
+  const ids = new Set(S.live.map(p => p.id));
+  S.purchases = S.live.concat(S.older.filter(p => !ids.has(p.id) && p.date < S.since));
+}
+// Make sure purchases are loaded far enough back to show month ym (and the
+// 12-month chart / bulk-buy spreads that reach into it).
+async function ensureLoaded(ym) {
+  const need = `${D.addMonths(ym, -LIVE_MONTHS)}-01`;
+  if (need >= S.loadedFrom) return;
+  const got = await B.loadPurchases(need, S.loadedFrom);
+  S.loadedFrom = need;
+  S.older = S.older.concat(got);
+  mergePurchases();
+  render();
+}
+
 const listeners = {
+  since: S.since,
   household: h => { S.H = h; S.gotH = true; maybeRender(); },
   months: m => { S.months = m; S.gotM = true; maybeRender(); },
-  purchases: p => { S.purchases = p; S.gotP = true; maybeRender(); },
+  purchases: p => { S.live = p; mergePurchases(); S.gotP = true; maybeRender(); },
   wallpapers: w => { S.wallpapers = w; if (S.H) applyLook(); maybeRender(); },
   error: e => { if (e.code === 'permission-denied') toast('You don’t have access to this household.'); },
 };
