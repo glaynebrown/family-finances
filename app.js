@@ -739,6 +739,9 @@ function bucketsSection(actual) {
   const sum = round2(list.reduce((a, b) => a + bal[b.id], 0));
   const unassigned = round2(actual - sum);
   return `<section class="buckets">
+    ${Math.abs(unassigned) > 0.004 ? `<div class="card unassigned"><div class="row between"><b>${unassigned > 0 ? 'Not assigned' : 'Buckets are over your savings by'}</b><b>${money(Math.abs(unassigned))}</b></div>
+      <p class="small muted">${unassigned > 0 ? 'Savings that isn’t in a bucket yet.' : 'The buckets add up to more than your savings balance.'}</p>
+      <button class="btn small" data-act="assign" data-v="${unassigned}">${unassigned > 0 ? 'Give it a job' : 'Take it from…'}</button></div>` : ''}
     ${list.map(b => {
       const goal = Number(b.goal) || 0;
       const full = goal && bal[b.id] >= goal - 0.004;
@@ -750,9 +753,6 @@ function bucketsSection(actual) {
         <div class="small muted">${full ? '✓ Full' : `${money(Math.max(0, goal - bal[b.id]))} to go`}${fill ? ` · fills ${fill}` : ''}${b.note ? ` · ${esc(b.note)}` : ''}</div>
       </div>`;
     }).join('')}
-    ${Math.abs(unassigned) > 0.004 ? `<div class="card unassigned"><div class="row between"><b>${unassigned > 0 ? 'Not assigned' : 'Buckets are over your savings by'}</b><b>${money(Math.abs(unassigned))}</b></div>
-      <p class="small muted">${unassigned > 0 ? 'Savings that isn’t in a bucket yet.' : 'The buckets add up to more than your savings balance.'}</p>
-      <button class="btn small" data-act="assign" data-v="${unassigned}">${unassigned > 0 ? 'Give it a job' : 'Take it from…'}</button></div>` : ''}
     <p class="small muted center">Press and hold a bucket to drag it into a new order.</p>
     <button class="linkish small add-link" data-act="bucket-new">+ Add bucket</button>
   </section>`;
