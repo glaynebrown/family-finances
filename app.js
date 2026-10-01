@@ -140,10 +140,10 @@ function applyLook() {
 const OLD_ROUTES = { bills: 'home', more: 'home', breakdown: 'review' };
 const route = () => { const r = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home'; return OLD_ROUTES[r] || r; };
 
-function render() {
+function render(force) {
   // Don't redraw under someone's fingers: wait until they leave the field / close the sheet.
   const a = document.activeElement;
-  if ((a && view.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'checkbox') || (sheetOpen() && S.sheet !== 'soft')) {
+  if (!force && (a && view.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'checkbox') || (sheetOpen() && S.sheet !== 'soft')) {
     S.pending = true;
     return;
   }
@@ -151,13 +151,18 @@ function render() {
   if (!H()) return;
   applyLook();
   const r = route();
-  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings };
+  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings, import: viewImport };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
   view.innerHTML = fn();
   window.scrollTo(0, y);
   drawTabs(r);
-  $('#fab').hidden = !['home', 'review'].includes(r);
+  const fab = $('#fab');
+  fab.hidden = !['home', 'review'].includes(r);
+  const importing = H().trackMode === 'import';
+  fab.dataset.act = importing ? 'import-file' : 'log';
+  fab.innerHTML = importing ? '<span>↑</span> Import' : '<span>+</span> Log';
+  fab.setAttribute('aria-label', importing ? 'Import bank transactions' : 'Log a purchase');
   const demo = !Store.configured;
   const bn = $('#banner');
   bn.hidden = !demo;
@@ -187,7 +192,7 @@ document.addEventListener('focusout', e => {
 function drawTabs(r) {
   const t = $('#tabs');
   t.hidden = false;
-  const on = id => (r === id || (id === 'home' && r === 'settings') || (id === 'review' && r === 'setup') ? 'on' : '');
+  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'review' && r === 'setup') ? 'on' : '');
   t.innerHTML = `<a href="#/review" class="${on('review')}">${icons.review}<span>Review</span></a>`
     + `<a href="#/home" class="money ${on('home')}" aria-label="Home">${icons.home}</a>`
     + `<a href="#/year" class="${on('year')}">${icons.year}<span>Year</span></a>`;
@@ -219,12 +224,12 @@ function catCard(c) {
 function purchaseRow(p, showPart = true) {
   const c = catById(p.cat);
   const part = showPart && p.part !== undefined && Math.abs(p.part - p.amount) > 0.004 ? `<span class="muted small"> (${money(p.part)} this month)</span>` : '';
-  const who = (p.byName || '?').slice(0, 1).toUpperCase();
+  const who = p.src === 'import' ? '🏦' : (p.byName || '?').slice(0, 1).toUpperCase();
   const tags = (p.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
   return `<button class="prow" data-act="edit-p" data-id="${esc(p.id)}">
     <span class="who" title="${esc(p.byName)}">${esc(who)}</span>
     <span class="pmain"><span class="pstore">${esc(p.store || (c ? c.name : 'Purchase'))}</span>
-      <span class="small muted">${D.niceDay(p.date)} · ${esc(c ? c.name : 'No category')}${p.spread > 1 ? ` · spread over ${p.spread} months` : ''}</span>
+      <span class="small muted">${D.niceDay(p.date)} · ${esc(c ? c.name : 'Uncategorized')}${p.spread > 1 ? ` · spread over ${p.spread} months` : ''}</span>
       ${tags ? `<span class="tags">${tags}</span>` : ''}${p.note ? `<span class="small muted">${esc(p.note)}</span>` : ''}</span>
     <span class="pamt">${money(p.amount)}${part}</span>
   </button>`;
@@ -250,8 +255,20 @@ function viewHome() {
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span></div>
     <div class="bar thin"><i style="width:${pct}%"></i></div>
     <div class="small muted">${money(totalU)} of ${money(totalB)} spent${overs.length ? ` · ${overs.length} ${calm() ? 'to look at during review' : 'over budget'}` : ''}</div>
+    ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'} · <button class="linkish small" data-act="log">Add one by hand</button></div>` : ''}
   </div>
-  <section class="cats">${c.cats.map(catCard).join('')}</section>`}`;
+  <section class="cats">${c.cats.map(catCard).join('')}</section>
+  ${uncatCard(c.spent)}`}`;
+}
+
+// Imported purchases nobody put in a category yet (they still count as spending).
+function uncatCard(spent) {
+  const list = spent.list.filter(p => p.cat === 'uncat' || !catById(p.cat));
+  if (!list.length) return '';
+  const total = list.reduce((a, p) => a + p.part, 0);
+  return `<section class="card uncat-card"><div class="row between"><h2>Uncategorized</h2><b>${money(total)}</b></div>
+    <p class="small muted">Tap one to pick a category. Anything left here comes up in monthly review.</p>
+    ${list.map(p => purchaseRow(p)).join('')}</section>`;
 }
 
 /* ---------- Log a purchase (sheet) ---------- */
@@ -306,6 +323,7 @@ async function saveLog() {
     by: L.by || me(), byName: L.byName || myName(), t: L.t || Date.now(),
   };
   if (L.id) rec.id = L.id;
+  if (L.src) { rec.src = L.src; rec.key = L.key || ''; }
   const before = Calc.checklist(H(), S.months[D.ymOf(rec.date)], D.ymOf(rec.date), S.purchases).cats.find(c => c.id === rec.cat);
   closeSheet();
   await B.savePurchase(rec);
@@ -612,7 +630,7 @@ function viewReview() {
   let items;
   if (tab === 'cat') {
     items = (H().categories || []).map(c => ({ key: c.id, name: `${c.emoji || ''} ${c.name}`, amt: s.cat[c.id] || 0, budget: Calc.budgetFor(H(), M, c) }));
-    for (const k in s.cat) if (!catById(k)) items.push({ key: k, name: 'Old category', amt: s.cat[k] });
+    for (const k in s.cat) if (!catById(k)) items.push({ key: k, name: k === 'uncat' ? 'Uncategorized' : 'Old category', amt: s.cat[k] });
   } else {
     const src = tab === 'store' ? s.store : s.tag;
     items = Object.keys(src).map(k => ({ key: k, name: k, amt: src[k] }));
@@ -651,7 +669,7 @@ function openItem(key) {
   const ym = S.bdYm || homeYm();
   const tab = S.bdTab;
   const c = tab === 'cat' ? catById(key) : null;
-  const title = tab === 'cat' ? (c ? `${c.emoji || ''} ${c.name}` : 'Old category') : (key || 'No store');
+  const title = tab === 'cat' ? (c ? `${c.emoji || ''} ${c.name}` : key === 'uncat' ? 'Uncategorized' : 'Old category') : (key || 'No store');
   const months = Array.from({ length: 12 }, (_, i) => D.addMonths(ym, i - 11));
   const val = m => {
     const s = Calc.spent(S.purchases, m);
@@ -678,6 +696,127 @@ function openItem(key) {
     <h3>${D.name(ym)}</h3>
     ${list.length ? list.map(p => purchaseRow(p)).join('') : '<p class="muted small">No purchases this month.</p>'}
     <details class="small"><summary>As a table</summary><table class="tbl">${months.map((m, i) => `<tr><td>${D.label(m)}</td><td>${money(vals[i])}</td></tr>`).join('')}</table></details>`);
+}
+
+/* ---------- Weekly import (Navy Federal CSV) ---------- */
+
+function pickImportFile() {
+  const f = $('#file');
+  f.value = '';
+  f.accept = '.csv,text/csv';
+  f.onchange = async () => {
+    const file = f.files[0];
+    f.accept = 'image/*';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = Imp.classify(text, H(), S.months);
+      const last = (H().imports || {}).through;
+      let gap = '';
+      if (last && res.from && res.from > D.dayStr(new Date(new Date(last + 'T12:00').getTime() + 864e5))) {
+        gap = `Your last import went through ${D.niceDay(last)}, but this file starts ${D.niceDay(res.from)}. A few days might be missing — download a longer date range to be safe.`;
+      }
+      for (const r of res.rows) r.firstNeeds = r.status === 'review' && (!r.cat || r.ask || r.venmo);
+      S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
+      location.hash = '#/import';
+    } catch (e) { console.error(e); toast(e.message || 'Couldn’t read that file'); }
+  };
+  f.click();
+}
+
+const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
+  + H().categories.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc((c.emoji || '') + ' ' + c.name)}</option>`).join('')
+  + `<option value="uncat" ${sel === 'uncat' ? 'selected' : ''}>Uncategorized (decide later)</option>`
+  + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
+
+function impRow(r) {
+  const needs = !r.cat && !r.splits;
+  const tagChips = r.tags.map(t => `<span class="tag">${esc(t)} <button class="chip-x" data-act="imp-untag" data-i="${r.i}" data-v="${esc(t)}" aria-label="Remove tag">×</button></span>`).join('');
+  const split = r.splits ? `<div class="splits">${r.splits.map((sp, j) => `<div class="edit-row"><input class="mini" data-ch="imp-split-amt" data-i="${r.i}" data-j="${j}" inputmode="decimal" value="${sp.amount}"><select data-ch="imp-split-cat" data-i="${r.i}" data-j="${j}">${catOptions(sp.cat)}</select><select class="split-tag" data-ch="imp-split-tag" data-i="${r.i}" data-j="${j}" aria-label="Tag"><option value="">Tag</option>${(H().tags || []).map(t => `<option ${sp.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>${j ? `<button class="x small" data-act="imp-split-del" data-i="${r.i}" data-j="${j}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+      <div class="small ${Math.abs(r.splits.reduce((a, x) => a + (Number(x.amount) || 0), 0) - r.amount) > 0.004 ? 'warn' : 'muted'}">Split total ${money(r.splits.reduce((a, x) => a + (Number(x.amount) || 0), 0))} of ${money(r.amount)} · <button class="linkish small" data-act="imp-split-add" data-i="${r.i}">+ another</button> · <button class="linkish small" data-act="imp-split-off" data-i="${r.i}">undo split</button></div></div>` : '';
+  return `<div class="imp-row ${needs ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
+    <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount))}${r.amount < 0 ? ' <span class="small muted">back</span>' : ''}</b></div>
+    <div class="small muted">${esc(r.reason)}</div>
+    ${r.splits ? split : `<div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Category">${catOptions(r.cat, true)}</select>
+      ${r.cat !== 'skip' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}</select>
+      ${r.amount > 0 ? `<button class="btn ghost small" data-act="imp-split" data-i="${r.i}">Split</button>` : ''}` : ''}</div>`}
+    ${tagChips ? `<div class="tags">${tagChips}</div>` : ''}
+    ${!r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always use this for ${esc(r.name)}</label>` : ''}
+  </div>`;
+}
+
+function viewImport() {
+  const I = S.imp;
+  if (!I) return `<header class="hero small-hero"><a class="back" href="#/home">‹ Home</a><h1>Import</h1></header>
+    <section class="card"><p>Download your joint checking transactions from Navy Federal as a <b>CSV</b> (any date range — overlaps are fine), then pick the file.</p>
+    <button class="btn full" data-act="import-file">Choose file</button></section>`;
+  const live = I.rows.filter(r => r.status !== 'dup');
+  const dups = I.rows.length - live.length;
+  const review = live.filter(r => r.status === 'review');
+  const skipped = live.filter(r => r.status === 'skip');
+  const first = review.filter(r => r.firstNeeds);
+  const rest = review.filter(r => !r.firstNeeds);
+  const open = review.filter(r => !r.cat && !r.splits).length;
+  return `<header class="hero small-hero"><a class="back" href="#/home" data-act="imp-cancel">‹ Cancel</a><h1>Import</h1></header>
+  <section class="card">
+    <div class="line"><span><b>${D.niceDay(I.from)} – ${D.niceDay(I.through)}</b></span><span class="small muted">${esc(I.name)}</span></div>
+    <p class="small muted">${review.length} to review · ${skipped.length} skipped (bills & transfers)${dups ? ` · ${dups} already imported` : ''}</p>
+    ${I.gap ? `<p class="msg small">${esc(I.gap)}</p>` : ''}
+  </section>
+  ${first.length ? `<h2 class="section-title">Needs a look <span class="small muted">${open} left</span></h2>${first.map(impRow).join('')}` : ''}
+  ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
+  ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
+  ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
+  ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo ones are skipped).</p>` : ''}
+  <section class="card">
+    <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
+      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" placeholder="from your Navy Federal app" value="${esc(I.bal || '')}"></span></label>
+    <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
+  </section>
+  <div class="import-save">
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases</button>
+  </div>`;
+}
+
+async function saveImport() {
+  const I = S.imp;
+  const now = Date.now();
+  const purchases = [];
+  const keysByMonth = {};
+  const rules = { ...(H().rules || {}) };
+  let latest = (H().imports || {}).through || '';
+  for (const r of I.rows) {
+    if (r.status === 'dup') continue;
+    const ym = D.ymOf(r.date);
+    (keysByMonth[ym] = keysByMonth[ym] || []).push(r.key);
+    if (r.post && r.post > latest) latest = r.post;
+    if (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits)) {
+      if (r.remember && r.cat === 'skip' && !r.ask) rules[r.ruleKey] = { action: 'skip', name: r.name };
+      continue;
+    }
+    const base = {
+      store: r.name, note: '', date: r.date, spread: 1, by: 'import', byName: 'Bank', src: 'import',
+      key: r.key, t: new Date(`${r.post || r.date}T12:00`).getTime(),
+    };
+    if (r.splits) {
+      r.splits.forEach((sp, j) => { const a = Number(sp.amount) || 0; if (a) purchases.push({ ...base, key: `${r.key}:${j}`, amount: a, cat: sp.cat || 'uncat', tags: [...new Set([...r.tags, ...(sp.tag ? [sp.tag] : [])])] }); });
+    } else {
+      purchases.push({ ...base, amount: r.amount, cat: r.cat || 'uncat', tags: [...r.tags] });
+    }
+    if (r.remember && !r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits) rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
+  }
+  if (purchases.length) await B.savePurchases(purchases);
+  for (const ym in keysByMonth) {
+    const had = (S.months[ym] || {}).importedKeys || [];
+    await B.setMonthField(ym, ['importedKeys'], [...new Set([...had, ...keysByMonth[ym]])]);
+  }
+  await B.setH([[['rules'], rules], [['imports', 'through'], latest], [['imports', 'at'], now]]);
+  const bal = num(I.bal);
+  if (bal !== null) await B.setMonth(homeYm(), { checking: { amount: bal, at: now } });
+  S.imp = null;
+  S.page = 'budgets';
+  location.hash = '#/home';
+  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
 }
 
 /* ---------- Month setup (the Checklist, step by step) ---------- */
@@ -878,6 +1017,17 @@ function viewSettings() {
 
   ${monthlyTotalCard()}
 
+  <section class="card"><h2>How we track spending</h2>
+    <div class="seg">${[['log', 'Log as we go'], ['import', 'Weekly import']].map(([k, l]) => `<button class="${(h.trackMode || 'log') === k ? 'on' : ''}" data-act="track" data-v="${k}">${l}</button>`).join('')}</div>
+    <p class="small muted">${(h.trackMode || 'log') === 'import'
+      ? 'Download your Navy Federal transactions (CSV) and tap Import on the $ page. You can still add cash purchases by hand.'
+      : 'Tap + Log after each purchase.'}</p>
+    ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
+      ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
+        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option><option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
+        <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
+  </section>
+
   <section class="card"><h2>Usual monthly income</h2>
     <div class="two">
       <label class="field"><span class="label">Nick</span><input data-ch="usual" data-f="nick" inputmode="decimal" value="${esc((h.usual || {}).nick)}" placeholder="$"></label>
@@ -1000,6 +1150,24 @@ const acts = {
 
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
   eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
+  'import-file': () => pickImportFile(),
+  'imp-cancel': () => { S.imp = null; },
+  'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
+  'imp-untag': el => { const r = S.imp.rows[el.dataset.i]; r.tags = r.tags.filter(t => t !== el.dataset.v); render(true); },
+  'imp-split': el => { const r = S.imp.rows[el.dataset.i]; r.splits = [{ amount: r.amount, cat: r.cat && !['skip', 'uncat'].includes(r.cat) ? r.cat : '' }, { amount: 0, cat: '' }]; render(true); },
+  'imp-split-add': el => { S.imp.rows[el.dataset.i].splits.push({ amount: 0, cat: '' }); render(true); },
+  'imp-split-del': el => { S.imp.rows[el.dataset.i].splits.splice(Number(el.dataset.j), 1); render(true); },
+  'imp-split-off': el => { S.imp.rows[el.dataset.i].splits = null; render(true); },
+  'imp-save': () => saveImport(),
+  track: async el => {
+    const v = el.dataset.v;
+    if (v === (H().trackMode || 'log')) return;
+    const ok = await ask(v === 'import'
+      ? 'Switch to weekly import? + Log becomes Import. Purchases you’ve already logged stay — just don’t import the same days you logged by hand.'
+      : 'Switch back to logging as you go? Imported purchases stay.', 'Switch');
+    if (ok) await B.setH([[['trackMode'], v]]);
+  },
+  'rule-del': async el => { const rules = { ...(H().rules || {}) }; delete rules[el.dataset.k]; await B.setH([[['rules'], rules]]); },
   page: el => { S.page = el.dataset.v; try { localStorage.setItem('ne-page', S.page); } catch (e) {} window.scrollTo(0, 0); render(); },
   bill: async el => {
     const ym = homeYm();
@@ -1302,6 +1470,25 @@ const changes = {
     const v = num(el.value);
     await B.setH([[['plans', el.dataset.ym, el.dataset.k], v === null ? B.DEL : v]]);
     toast(`${D.name(el.dataset.ym)} updated`);
+  },
+  'imp-cat': el => {
+    const r = S.imp.rows[el.dataset.i];
+    r.cat = el.value;
+    if (r.cat === 'skip') r.remember = false;
+    render(true);
+  },
+  'imp-tag': el => { const r = S.imp.rows[el.dataset.i]; if (el.value && !r.tags.includes(el.value)) r.tags.push(el.value); render(true); },
+  'imp-bal': el => { S.imp.bal = el.value; },
+  'imp-remember': el => { S.imp.rows[el.dataset.i].remember = el.checked; },
+  'imp-split-amt': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].amount = num(el.value) || 0; render(true); },
+  'imp-split-tag': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].tag = el.value; },
+  'imp-split-cat': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].cat = el.value; render(true); },
+  rule: async el => {
+    const rules = { ...(H().rules || {}) };
+    const old = rules[el.dataset.k] || {};
+    const v = el.value;
+    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : { ...old, action: 'cat', cat: v };
+    await B.setH([[['rules'], rules]]);
   },
   usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
