@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Family Finances</title>
+<meta name="description" content="Our monthly budget, bills and savings.">
+<meta name="theme-color" content="#F6F1EA">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Family Finances">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="fonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=Nunito:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // Put the last-used month color, fonts and wallpaper on before anything draws.
+  try {
+    var l = JSON.parse(localStorage.getItem('ne-look') || 'null');
+    if (l) {
+      var r = document.documentElement.style;
+      for (var k in l.vars) r.setProperty(k, l.vars[k]);
+      if (l.fonts) document.getElementById('fonts').href = l.fonts;
+    }
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div id="wall" class="wall"></div>
+<div id="banner" class="banner" hidden></div>
+<main id="view"><p class="loading">Loading…</p></main>
+<nav id="tabs" class="tabs" hidden></nav>
+<button id="fab" class="fab" data-act="log" hidden aria-label="Log a purchase"><span>+</span> Log</button>
+<div id="sheet-wrap" class="sheet-wrap" hidden>
+  <div class="sheet-back" data-act="close"></div>
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
+</div>
+<div id="dialog-wrap" class="dialog-wrap" hidden><div id="dialog" class="dialog" role="alertdialog"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="confetti" aria-hidden="true"></div>
+<input id="file" type="file" accept="image/*" hidden>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="data.js"></script>
+<script src="store.js"></script>
+<script src="demo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Everyone signs in with email + password. A household can only be read or
+// changed by its members. Joining takes the household's 8-letter code: the
+// code doc points at the household, and the join write must carry that code.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function memberOf(hid) {
+      return signedIn() && request.auth.uid in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /joinCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if memberOf(request.resource.data.hid);
+      allow delete: if memberOf(resource.data.hid);
+    }
+
+    match /households/{hid} {
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.members.keys().hasOnly([request.auth.uid]);
+      allow update: if signedIn() && (
+        request.auth.uid in resource.data.members
+        || (
+          // joining: only add yourself, and prove you have the code
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'people', 'joinAttempt'])
+          && request.resource.data.joinAttempt == resource.data.joinCode
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.people.diff(resource.data.people).affectedKeys().hasOnly([request.auth.uid])
+        )
+      );
+      allow delete: if false;
+
+      match /{sub=**} {
+        allow read, write: if memberOf(hid);
+      }
+    }
+  }
+}
