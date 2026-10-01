@@ -118,6 +118,7 @@ function applyLook() {
   const vars = {
     '--accent': accent,
     '--on-accent': onColor(accent),
+    '--accent-ink': onColor(accent) === '#FFFFFF' ? accent : `color-mix(in srgb, ${accent} 62%, #2B2522)`,
     '--glass': String(look.glass === undefined ? 0.82 : look.glass),
     '--hfont': `'${look.heading || 'Oswald'}'`,
     '--bfont': `'${look.body || 'Nunito'}'`,
@@ -213,18 +214,14 @@ function viewHome() {
   const ym = homeYm();
   const M = S.months[ym];
   const c = Calc.checklist(H(), M, ym, S.purchases);
-  const left = D.daysLeft(ym);
-  const sub = left === null ? (ym > D.curYm() ? 'Starts tomorrow' : '') : `${left} day${left === 1 ? '' : 's'} left`;
   const totalB = c.cats.reduce((s, x) => s + x.budget, 0);
   const totalU = c.cats.reduce((s, x) => s + x.used, 0);
   const pct = totalB ? Math.min(100, (totalU / totalB) * 100) : 0;
   const overs = c.cats.filter(x => x.over);
   return `
-  <header class="hero">
+  <header class="hero home-hero">
     <a class="gear" href="#/settings" aria-label="Settings">${icons.gear}</a>
-    <div class="hello">Hi, ${esc(myName())}</div>
     <h1>${D.name(ym)}</h1>
-    <div class="hero-sub">${sub}</div>
   </header>
   ${M && M.setup ? '' : `<div class="card note-card"><p><b>${D.name(ym)} isn’t set up yet.</b> You can still log purchases — they’ll count against your normal budgets.</p><a class="btn" href="#/setup">Set up ${D.name(ym)}</a></div>`}
   <div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>
@@ -429,16 +426,17 @@ function viewYear() {
   const early = rows.filter(r => r.past && !r.hasData);
   const cards = rows.filter(r => !(r.past && !r.hasData)).map(yearCard).join('');
   return `
-  <header class="hero small-hero"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
+  <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
   <section class="card">
     <div class="row between"><span class="label">Savings${showActual ? ' right now' : ''}</span><button class="linkish small" data-act="savings">Update</button></div>
     <div class="big-num">${money(showActual ? actual : proj || 0)}</div>
     ${bar}
-    <div class="small muted">${proj !== null ? `On track for <b>${money(proj)}</b> by Dec 31` : 'Add income for the months ahead to see a projection'}
+    <div class="small muted">${proj !== null ? `On track for <b class="${proj >= goalMin ? 'save-good' : ''}">${money(proj)}</b> by Dec 31` : 'Add income for the months ahead to see a projection'}
       ${proj !== null ? (proj >= goalMax ? ' — past your goal! 🎉' : proj >= goalMin ? ' — past the minimum.' : ` — ${money(goalMin - proj)} short of the minimum.`) : ''}</div>
     ${Number(sv.hysa) ? `<div class="small muted">HYSA: ${money(sv.hysa)}</div>` : ''}
   </section>
   ${hysaCard}
+  <h2 class="year-head">Projected Savings</h2>
   ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : `${D.short(early[0].ym)}–${D.short(early[early.length - 1].ym)} were before the app.`}</p>` : ''}
   <div class="months">${cards}</div>
   ${early.length === 12 ? `<button class="btn ghost full" data-act="plan" data-ym="${Y}-01">Plan January ${Y}</button>` : ''}`;
@@ -775,7 +773,7 @@ function viewSettings() {
   const h = H();
   const look = h.look || {};
   const sv = h.savings || {};
-  return `<header class="hero small-hero"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1></header>
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1></header>
 
   <section class="card"><h2>You</h2>
     <label class="field"><span class="label">Your name</span><input data-ch="myname" value="${esc(myName())}"></label>

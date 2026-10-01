@@ -324,3 +324,20 @@ body.has-wall .spend-sum { background: var(--card); border-radius: var(--r); pad
 .line.tap.checking-row { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 12px; padding: 10px 12px; margin: 0 0 6px; }
 .checking-row .val-edit { font-size: 1.15rem; }
 .move-card { border-left: 5px solid var(--accent); }
+.home-hero { text-align: center; padding: 14px 48px 16px; }
+.home-hero h1 { background: none; color: var(--accent-ink, var(--accent)); padding: 0; font-size: 3rem; letter-spacing: .02em; }
+.home-hero .gear { top: 16px; }
+body.has-wall .home-hero h1 { text-shadow: 0 1px 2px rgba(255, 255, 255, .9), 0 0 18px rgba(255, 255, 255, .85); }
+/* Page titles: plain centered text. Review/setup wear the month color; Year and Settings stay black. */
+.small-hero { text-align: center; }
+.small-hero h1 { background: none; color: var(--accent-ink, var(--accent)); padding: 0; font-size: 2.3rem; }
+.small-hero.ink-title h1 { color: var(--ink); }
+.small-hero .back { text-align: left; }
+body.has-wall .small-hero h1 { text-shadow: 0 1px 2px rgba(255, 255, 255, .9), 0 0 18px rgba(255, 255, 255, .85); }
+/* Savings has its own colors (the app icon's greens), not the month color. */
+:root { --save: #4E7B5B; --save-light: #D2F0A6; }
+.goal-track .fill { background: var(--save); }
+.goal-track .ghost { background: var(--save-light); }
+.save-good { color: var(--save); }
+.year-head { text-align: center; color: var(--ink); font-size: 1.5rem; margin: 22px 0 6px; }
+body.has-wall .year-head { text-shadow: 0 1px 2px rgba(255, 255, 255, .9), 0 0 18px rgba(255, 255, 255, .85); }
