@@ -1023,7 +1023,8 @@ function startDraft() {
     d.budgets = {};
   }
   for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Calc.budgetFor(H(), null, c, N);
-  d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? '']));
+  // Starts from the Year tab: the month's own amount, else the usual income.
+  d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? (H().usual || {})[e.id] ?? '']));
   // Paid every two weeks into checking: start with two paychecks splitting the
   // planned (or usual) amount; amounts are editable and a third can be added.
   if (payInChecking()) {
@@ -1106,7 +1107,7 @@ function viewSetup() {
       <button class="linkish small" data-act="d-in-add">+ Add a paycheck</button>
       <div class="line total-line"><span>Total</span><b>${money(d.incoming.reduce((a, x) => a + (Number(x.amount) || 0), 0))}</b></div>`;
   } else if (d.step === 4) {
-    body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month. These fund ${D.name(D.addMonths(N, 1))}.</p>
+    body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">What you expect to get paid this month (these pay for ${D.name(D.addMonths(N, 1))}). Filled in from the Year tab — change it here and the Year tab updates too.</p>
       <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input id="d-pay-${esc(e.id)}" inputmode="decimal" value="${esc(d.pay[e.id])}"></label>`).join('')}</div>
       <p class="small muted">One-time money for ${D.name(N)} goes under Additional income on the Bills & extras step.</p>`;
   } else {
