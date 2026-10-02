@@ -151,6 +151,7 @@ body.has-wall .hello, body.has-wall .hero-sub { display: block; width: fit-conte
 .field { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
 .field.check { flex-direction: row; align-items: center; gap: 10px; }
 .two .field.check { margin-top: 32px; }
+.two > .field:not(.check) { justify-content: flex-end; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1.5px solid var(--line); background: rgba(255, 255, 255, .7); border-radius: 99px; padding: 7px 13px; cursor: pointer; font-size: .95rem; }
 .chip.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
@@ -413,3 +414,19 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .autopay .switch { transform: scale(.8); transform-origin: right center; }
 .bill-amt { display: flex; flex-direction: column; align-items: flex-end; }
 .bill-amt .small { font-size: .72rem; }
+
+/* Settings: cards that open and close, and rows that open another page */
+.fold-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; margin-bottom: 8px; }
+.fold-head h2 { margin: 0; flex: 1; }
+.fold.shut .fold-head { margin-bottom: 0; }
+.fold-sum { font-weight: 700; color: var(--muted); }
+.fold-arrow { color: var(--muted); font-size: .9rem; width: 24px; text-align: center; }
+.fold-head + h3 { margin-top: 4px; }
+.menu-row { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+.menu-row > span:first-child { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.menu-row .chev { font-size: 1.6rem; color: var(--muted); line-height: 1; }
+
+.carried-head { margin: 12px 0 4px; }
+/* Shared bill: transfer chips get their own full-width line under the bill */
+.check-row.has-shares { flex-wrap: wrap; row-gap: 4px; }
+.check-row.has-shares > .shares { flex-basis: 100%; padding-left: 40px; margin-top: 0; }

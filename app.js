@@ -11,6 +11,7 @@ const S = {
   gotH: false, gotM: false, gotP: false,
   bdYm: null, bdTab: 'cat', year: null, open: {}, sinceOpen: false,
   draft: null, pending: false, openShares: {}, adding: null,
+  setOpen: (() => { try { return JSON.parse(localStorage.getItem('ne-set-open')) || {}; } catch (e) { return {}; } })(),
   hideDone: (() => { try { return localStorage.getItem('ne-hide') === '1'; } catch (e) { return false; } })(),
   page: (() => { try { return localStorage.getItem('ne-page') === 'budgets' ? 'budgets' : 'overview'; } catch (e) { return 'overview'; } })(),
 };
@@ -28,6 +29,7 @@ const calm = () => !H() || !H().look || H().look.calm !== false;
 const homeYm = () => Calc.homeMonth(S.months);
 const catById = id => (H().categories || []).find(c => c.id === id);
 const feat = k => ((H() && H().features) || {})[k];
+const checkingBuffer = () => { const b = ((H() && H().savings) || {}).buffer; return b === undefined || b === null ? 500 : Number(b) || 0; };
 const bucketsOn = () => !!feat('buckets');
 const overviewOn = () => feat('overview') !== false;
 const payInChecking = () => !!feat('payInChecking');
@@ -95,6 +97,7 @@ const icons = {
   review: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M8 10.5h5M10.5 8v5"/></svg>',
   bills: '<svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="m8.5 9 1.5 1.5L13 7.5M8.5 15h7"/></svg>',
   year: '<svg viewBox="0 0 24 24"><path d="M5 20V11M10 20V6M15 20v-7M20 20V9"/></svg>',
+  gallery: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5.5-5.5 4 4 2.5-2.5 4.5 4.5"/></svg>',
   more: '<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg>',
 };
 
@@ -166,7 +169,13 @@ function render(force) {
   const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings, import: viewImport, savings: viewSavings };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
+  // Keep anything typed in "add" boxes (and which one had focus) across a redraw.
+  const typed = {};
+  view.querySelectorAll('.add-row input[id], .add-inline input[id]').forEach(i => { if (i.value) typed[i.id] = i.value; });
+  const focusId = document.activeElement && view.contains(document.activeElement) ? document.activeElement.id : '';
   view.innerHTML = fn();
+  for (const id in typed) { const i = document.getElementById(id); if (i && !i.value) i.value = typed[id]; }
+  if (focusId && typed[focusId]) { const i = document.getElementById(focusId); if (i) i.focus(); }
   window.scrollTo(0, y);
   drawTabs(r);
   const fab = $('#fab');
@@ -197,8 +206,9 @@ document.addEventListener('focusout', e => {
       const btn = row.querySelector('button[data-act]');
       if (btn && inputs.length && inputs.every(i => i.value.trim() !== '')) { btn.click(); return; }
     }
-    if (S.pending && !sheetOpen()) render();
-    else if (S.pending && sheetOpen() && !$('#sheet').contains(now)) render();
+    const tapping = S.lastDown && S.lastDown.closest && S.lastDown.closest('[data-act]');
+    const later = () => { if (S.pending && !sheetOpen()) render(); };
+    if (tapping) setTimeout(later, 350); else later();
   }, 0);
 });
 
@@ -382,17 +392,18 @@ function billsSections() {
     ${c.bills.filter(b => !(S.hideDone && b.paid)).map(b => {
       const hs = helpersBy[b.id] || [];
       const shareTotal = hs.reduce((s, h) => s + Number(h.amount || 0), 0);
-      // Shared bill: what actually gets charged (our part + theirs), and a
-      // marker for each person's transfer -- marking one adds it to checking.
-      const charged = hs.length ? `<span class="small muted">Total charged ≈ ${money(b.charge)}</span>` : '';
-      const extra = !hs.length ? '' : charged + (hs.every(h => h.received) && !S.openShares[b.id]
+      // Shared bill: what actually gets charged (our part + theirs) next to the name, and a
+      // marker for each person's transfer on its own line -- marking one adds it to checking.
+      const charged = hs.length ? ` <span class="small muted">(${money(b.charge)} total)</span>` : '';
+      const extra = !hs.length ? '' : (hs.every(h => h.received) && !S.openShares[b.id]
         ? `<span class="small muted shares"><button class="linkish small" data-act="shares" data-id="${esc(b.id)}" aria-label="Show transfers">✓ ${hs.map(h => esc(h.name)).join(' & ')} sent theirs</button></span>`
-        : `<span class="small muted shares">Transfers: ${hs.map(h => `<button class="share ${h.received ? 'on' : ''}" data-act="held" data-id="${esc(h.id)}" aria-pressed="${!!h.received}">${h.received ? '✓' : '○'} ${esc(h.name)} ${money(h.amount)}</button>`).join(' ')}</span>`);
-      return `<div class="check-row ${b.paid ? 'done' : ''}">
+        : `<span class="small muted shares">${hs.map(h => `<button class="share ${h.received ? 'on' : ''}" data-act="held" data-id="${esc(h.id)}" aria-pressed="${!!h.received}">${h.received ? '✓' : '○'} ${esc(h.name)} ${money(h.amount)}</button>`).join(' ')}</span>`);
+      return `<div class="check-row ${b.paid ? 'done' : ''} ${hs.length ? 'has-shares' : ''}">
         <button class="box ${b.paid ? 'on' : ''}" data-act="bill" data-id="${esc(b.id)}" aria-label="Paid">${b.paid ? '✓' : ''}</button>
         <span class="day">${D.ordinal(b.day)}</span>
-        <span class="grow">${esc(b.name)} ${extra}${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
+        <span class="grow"><span>${esc(b.name)}${charged}</span>${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
         <span class="bill-amt">${Math.abs(b.amountNow - b.normal) > 0.004 ? `<span class="small muted">normally ${money(b.normal)}</span>` : ''}<button class="val-edit" data-act="bill-amt" data-id="${esc(b.id)}" aria-label="Change this month's amount">${money(b.amountNow)}</button></span>
+        ${extra}
       </div>`;
     }).join('')}
     ${doneNote(c.bills.filter(b => b.paid).length, 'paid')}
@@ -485,9 +496,12 @@ function viewYear() {
   const early = rows.filter(r => r.past && !r.hasData);
   const shown = rows.filter(r => !(r.past && !r.hasData));
   const cards = shown.map(yearCard).join('');
-  const isOpen = r => (S.open[r.ym] !== undefined ? S.open[r.ym] : !r.past);
-  // If anything is open, the arrow closes everything; only when all are closed does it open them all.
+  const isOpen = r => !!S.open[r.ym];
+  // Months start collapsed. If anything is open, the arrow closes everything; otherwise it
+  // opens this month and later (or every month when looking back at a finished year).
   const allOpen = shown.length && shown.some(isOpen);
+  const ahead = shown.filter(r => !r.past);
+  const arrowYms = (allOpen || !ahead.length ? shown : ahead).map(r => r.ym);
   return `
   <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
   <section class="card ${bucketsOn() && showActual ? 'tap-card' : ''}" ${bucketsOn() && showActual ? 'role="button" tabindex="0" data-act="go-savings"' : ''}>
@@ -500,7 +514,7 @@ function viewYear() {
     ${bucketsOn() && showActual ? `<div class="small tap-hint">See what it’s set aside for ›</div>` : ''}
   </section>
   <div class="year-head-row"><h2 class="year-head">Projected Savings</h2>
-  ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${shown.map(r => r.ym).join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
+  ${shown.length ? `<button class="toggle-all" data-act="all-months" data-open="${allOpen ? '0' : '1'}" data-yms="${arrowYms.join(',')}" aria-label="${allOpen ? 'Collapse all months' : 'Show all months'}">${allOpen ? '▲' : '▼'}</button>` : ''}</div>
   ${early.length ? `<p class="small muted center">${early.length === 12 ? 'No months planned for this year yet.' : 'Prior data kept in Google Sheets'}</p>` : ''}
   <div class="months">${cards}</div>
   ${early.length === 12 ? `<button class="btn ghost full" data-act="plan" data-ym="${Y}-01">Plan January ${Y}</button>` : ''}`;
@@ -508,7 +522,7 @@ function viewYear() {
 
 function yearCard(r) {
   const color = monthColor(r.ym);
-  const open = S.open[r.ym] !== undefined ? S.open[r.ym] : !r.past;
+  const open = !!S.open[r.ym];
   const head = `<div class="mhead" style="background:${color};color:${onColor(color)}"><span>${D.name(r.ym)}</span>
     ${r.current ? '<span class="pill">This month</span>' : ''}${!open && r.balance !== null ? `<span class="small">${money(r.balance)}</span>` : ''}</div>`;
   if (!open) return `<button class="mcard card collapsed" data-act="expand" data-ym="${r.ym}" data-open="0" aria-expanded="false">${head}</button>`;
@@ -553,7 +567,7 @@ function openPlan(ym) {
   openSheet(`<div class="sheet-head"><h2>${D.label(ym)}</h2><button class="x" data-act="close">×</button></div>
     <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)} income</span><input id="p-pay-${esc(e.id)}" inputmode="decimal" value="${v(p[e.id])}"></label>`).join('')}</div>
     <div class="two"><label class="field"><span class="label">Additional income <span class="muted small">(one-time, this month)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
-    <label class="field"><span class="label">What is it?</span><input id="p-elevname" placeholder="e.g. ElevateEMS" value="${esc(p.elevateName || '')}"></label></div>
+    <label class="field"><span class="label">What is it?</span><input id="p-elevname" placeholder="e.g. OT" value="${esc(p.elevateName || '')}"></label></div>
     <p class="small muted">Additional income goes into ${D.name(ym)}’s savings and shows up on its checklist when you set it up — it isn’t next month’s income.</p>
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
     <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
@@ -562,7 +576,7 @@ function openPlan(ym) {
       ? `<p class="small muted">${D.name(ym)} is already set up — change its budgets on the Budgets page.</p>`
       : `<div class="field"><span class="label">Budgets for ${D.name(ym)} <span class="muted small">(starts from your normal amounts; used when you set up the month)</span></span>
         ${H().categories.map(c => { const pb = (p.budgets || {})[c.id]; return `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="p-b-${esc(c.id)}" inputmode="decimal" value="${pb !== undefined && pb !== null ? pb : c.budget}"></div>`; }).join('')}</div>`}
-    <label class="field"><span class="label">Savings this month <span class="muted small">(leave blank to figure it automatically${y && y.kind === 'auto' ? `: ${money(y.savings)}` : ''})</span></span><input id="p-sav" inputmode="decimal" value="${v(p.savings)}"></label>
+    <label class="field"><span class="label">Added to savings this month <span class="muted small">(leave blank to figure it automatically${y && y.kind === 'auto' ? `: ${money(y.savings)}` : ''})</span></span><input id="p-sav" inputmode="decimal" value="${v(p.savings)}"></label>
     <label class="field"><span class="label">Note</span><input id="p-note" value="${esc(p.note || '')}"></label>
     <div class="row end sheet-foot"><button class="btn" data-act="p-save">Save</button></div>`);
 }
@@ -631,20 +645,6 @@ function readMove(key) {
   return box.dataset.dir === 'out' ? -Math.abs(v) : Math.abs(v);
 }
 
-// End of month: move this month's Savings/Excess into (or out of) savings.
-function moveCard() {
-  const ym = homeYm();
-  const M = S.months[ym];
-  if (!M || !M.setup || (M.moved !== null && M.moved !== undefined)) return '';
-  const c = Calc.checklist(H(), M, ym, S.purchases);
-  return `<section class="card move-card">
-    <div class="line"><span><b>${D.name(ym)} Savings/Excess</b></span><b>${money(c.excess)}</b></div>
-    <p class="small muted">${c.excess >= 0 ? 'Move it over when you set up next month.' : 'Spending went past the plan — cover it from savings when you set up next month.'} Change the amount to what you actually moved.</p>
-    ${moveForm('rev', c.excess)}
-    <button class="btn full" data-act="move">Save transfer</button>
-  </section>`;
-}
-
 // Every December (and January, in case it slips): move anything above the
 // savings floor to the HYSA, then look ahead to the next year.
 function hysaCard() {
@@ -690,7 +690,6 @@ function viewReview() {
   const n = nextSetupYm();
   return `<header class="hero small-hero"><h1>Review</h1></header>
   ${hysaCard()}
-  ${moveCard()}
   <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
   <h2 class="section-title">Breakdown</h2>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
@@ -1049,7 +1048,7 @@ function startDraft() {
   } else {
     const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
     d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
-    d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b }));
+    d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b, carried: true }));
     if (Number(plan.elevate) > 0) d.back.push({ id: newId(), name: plan.elevateName || 'Additional income', amount: Number(plan.elevate), received: false });
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
@@ -1123,7 +1122,14 @@ function viewSetup() {
       return `<div class="line"><span>${D.ordinal(b.day)} · ${esc(b.name)}</span><b>${money(Calc.billAmount(b, N))}</b></div>`
         + hs.map(h => `<div class="check-row share-row ${h.received ? 'done' : ''}"><button class="box ${h.received ? 'on' : ''}" data-act="d-toggle" data-kind="held" data-id="${esc(h.id)}" aria-label="Received">${h.received ? '✓' : ''}</button><span class="grow">${esc(h.name)}’s share <span class="small muted">${h.received ? 'in checking' : 'not in yet'}</span></span><input class="mini" id="d-h-${esc(h.id)}" inputmode="decimal" value="${esc(h.amount)}"></div>`).join('');
     }).join('');
-    const rows = (kind, flag) => d[kind].map(o => `<div class="check-row ${o[flag] ? 'done' : ''}"><button class="box ${o[flag] ? 'on' : ''}" data-act="d-toggle" data-kind="${kind}" data-id="${esc(o.id)}">${o[flag] ? '✓' : ''}</button><span class="grow">${esc(o.name)}${o.carried ? ' <span class="small muted">carried over</span>' : ''}</span><b>${money(o.amount)}</b><button class="x small" data-act="d-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></div>`).join('') || '<p class="muted small">None</p>';
+    const row = (kind, flag) => o => `<div class="check-row ${o[flag] ? 'done' : ''}"><button class="box ${o[flag] ? 'on' : ''}" data-act="d-toggle" data-kind="${kind}" data-id="${esc(o.id)}">${o[flag] ? '✓' : ''}</button><span class="grow">${esc(o.name)}</span><b>${money(o.amount)}</b><button class="x small" data-act="d-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></div>`;
+    // Items from the Year tab first; anything from last month that wasn't checked off gets its own group.
+    const rows = (kind, flag) => {
+      const fresh = d[kind].filter(o => !o.carried);
+      const open = d[kind].filter(o => o.carried);
+      if (!fresh.length && !open.length) return '<p class="muted small">None</p>';
+      return fresh.map(row(kind, flag)).join('') + (open.length ? `<p class="small carried-head"><b>Still open from ${D.name(R)}</b> <span class="muted">Not checked off yet — remove any that are done.</span></p>${open.map(row(kind, flag)).join('')}` : '');
+    };
     const add = kind => `<div class="add-row"><input id="d-${kind}-name" placeholder="What"><input id="d-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="d-add" data-kind="${kind}">Add</button></div>`;
     body = `<h2>Bills & extras for ${D.name(N)}</h2>
       <h3>Automatic payments</h3>${bills}<p class="small muted">Check off shared payments that are already in. Change bills in Settings.</p>
@@ -1156,16 +1162,29 @@ function viewSetup() {
       ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
       ${line('−', 'Budgets', c.budgetsLeft)}
       <div class="line total-line ${c.excess < 0 ? 'neg' : ''}"><span>Savings/Excess</span><b>${money(c.excess)}</b></div>
-      <div class="stack">
-        ${c.excess ? `<p class="small muted">Moving money now? Change the amount to what you actually transfer.</p>${moveForm('setup', c.excess)}
-        <button class="btn full" data-act="d-finish" data-mode="move">Finish & save transfer</button>` : ''}
-        <button class="btn ghost full" data-act="d-finish" data-mode="none">Finish${c.excess ? ' — I’ll move money later' : ''}</button>
-      </div>`;
+      <div class="stack">${moveChoice(c.excess, d)}</div>`;
   }
   return `<header class="hero small-hero"><h1>Set up ${D.name(N)}</h1>${d.redo ? '<div class="hero-sub">Already set up — this will redo it</div>' : ''}</header>
     ${steps}<section class="card setup">${body}</section>
     <div class="row between">${d.step > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/review" data-act="d-cancel">Cancel</a>'}
       ${d.step < STEPS.length - 1 ? `<button class="btn" data-act="d-next">Next: ${STEPS[d.step + 1]}</button>` : ''}</div>`;
+}
+
+// Last setup step: keep a cushion in checking and suggest moving only what's above it.
+function moveChoice(excess, d) {
+  const buf = checkingBuffer();
+  const above = round2(excess - buf);
+  const finish = (label, ghost) => `<button class="btn ${ghost ? 'ghost ' : ''}full" data-act="d-finish" data-mode="none">${label}</button>`;
+  const moveBtn = label => `<button class="btn full" data-act="d-finish" data-mode="move">${label}</button>`;
+  if (excess < -0.004) return `<p class="small muted">Spending is planned past what’s in checking. Cover it from savings now, or leave it and see how the month goes. Change the amount to what you actually move.</p>
+    ${moveForm('setup', excess)}${moveBtn('Finish & save transfer')}${finish('Finish — leave it for now', true)}`;
+  if (above > 0.004) return `<p class="small muted">Keep a cushion in checking for surprises. You can move anything above it to savings now — or leave it all in checking.</p>
+    <div class="line"><span>Cushion to keep in checking</span><b>${money(buf)}</b></div>
+    <div class="line"><span><b>Could move now</b></span></div>
+    ${moveForm('setup', above)}${moveBtn('Finish & move to savings')}${finish('Finish — keep it all in checking', true)}`;
+  if (d.showMove) return `<p class="small muted">Change the amount to what you actually move.</p>${moveForm('setup', Math.max(0, excess))}${moveBtn('Finish & save transfer')}${finish('Finish — keep it all in checking', true)}`;
+  return `<p class="small muted">${excess > 0.004 ? `Your ${money(excess)} excess is under your ${money(buf)} cushion — leave it in checking this month.` : 'Nothing extra to move this month.'}</p>
+    ${finish('Finish')}${excess > 0.004 ? '<button class="linkish small" data-act="d-showmove">Move some anyway</button>' : ''}`;
 }
 
 async function finishSetup(mode) {
@@ -1206,21 +1225,16 @@ async function finishSetup(mode) {
 /* ---------- Settings ---------- */
 
 function viewSettings() {
-  if (B.loadAllWalls && !S.wallsLoaded) {
-    S.wallsLoaded = true;
-    B.loadAllWalls().then(all => { S.wallpapers = { ...all, ...S.wallpapers }; for (const k in all) S.wallpapers[k] = all[k]; render(); })
-      .catch(e => { S.wallsLoaded = false; console.warn('wallpapers', e); });
-  }
+  const sub = location.hash.replace(/^#\/?/, '').split('/')[1] || '';
+  if (sub === 'setup') return viewSettingsSetup();
+  if (sub === 'look') return viewSettingsLook();
   const h = H();
-  const look = h.look || {};
-  const sv = h.savings || {};
-  return `<header class="hero small-hero ink-title"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1></header>
+  const catTotal = h.categories.reduce((a, c) => a + (Number(c.budget) || 0), 0);
+  const billTotal = (h.bills || []).reduce((a, b) => a + (Number(b.amount) || 0), 0);
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1>
+    <a class="gear" href="#/settings/look" aria-label="Appearance">${icons.gallery}</a></header>
 
-  <section class="card"><h2>You</h2>
-    <label class="field"><span class="label">Your name</span><input data-ch="myname" value="${esc(myName())}"></label>
-  </section>
-
-  <section class="card"><h2>Categories</h2><p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>
+  ${fold('cats', 'Categories', money(catTotal), `<p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>
     ${h.categories.map((c, i) => `<div class="edit-row">
       <input class="emoji-in" data-ch="cat" data-id="${esc(c.id)}" data-f="emoji" value="${esc(c.emoji || '')}" aria-label="Emoji">
       <input class="grow" data-ch="cat" data-id="${esc(c.id)}" data-f="name" value="${esc(c.name)}" aria-label="Name">
@@ -1228,17 +1242,9 @@ function viewSettings() {
       <button class="x small" data-act="cat-up" data-id="${esc(c.id)}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
       <button class="x small" data-act="cat-del" data-id="${esc(c.id)}" aria-label="Remove">×</button></div>`).join('')}
     <div class="line subtotal"><span>Categories total</span><b>${money(h.categories.reduce((a, c) => a + (Number(c.budget) || 0), 0))}</b></div>
-    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>
-  </section>
+    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>`)}
 
-  <section class="card"><h2>Stores</h2><div class="chips">${(h.stores || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="stores" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
-    <div class="add-row"><input id="stores-new" placeholder="Add a store"><button class="btn small" data-act="list-add" data-kind="stores">Add</button></div>
-    <h2>Tags</h2><p class="small muted">For tracking things inside a category — like Diapers (in Twins) or Eating out (in Food).</p>
-    <div class="chips">${(h.tags || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="tags" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
-    <div class="add-row"><input id="tags-new" placeholder="Add a tag"><button class="btn small" data-act="list-add" data-kind="tags">Add</button></div>
-  </section>
-
-  <section class="card"><h2>Bills</h2><p class="small muted">Automatic payments: due day, name, amount. Schedule a change when an amount is going up or down.</p>
+  ${fold('bills', 'Bills', money(billTotal), `<p class="small muted">Automatic payments: due day, name, amount. Schedule a change when an amount is going up or down.</p>
     ${(h.bills || []).map(b => `<div class="bill-edit">
       <div class="edit-row"><input class="mini day-in" data-ch="bill" data-id="${esc(b.id)}" data-f="day" inputmode="numeric" value="${esc(b.day)}" aria-label="Due day">
       <input class="grow" data-ch="bill" data-id="${esc(b.id)}" data-f="name" value="${esc(b.name)}" aria-label="Name">
@@ -1254,11 +1260,51 @@ function viewSettings() {
       <details class="small"><summary>Schedule a change</summary><div class="add-row"><input type="month" id="chg-m-${esc(b.id)}" value="${D.addMonths(homeYm(), 1)}"><input id="chg-a-${esc(b.id)}" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="chg-add" data-id="${esc(b.id)}">Add</button></div></details>
     </div>`).join('')}
     <div class="line subtotal"><span>Bills total</span><b>${money((h.bills || []).reduce((a, b) => a + (Number(b.amount) || 0), 0))}</b></div>
-    <div class="add-row"><input id="bill-day" class="mini" inputmode="numeric" placeholder="Day"><input id="bill-name" placeholder="New bill"><input id="bill-amt" class="mini" inputmode="decimal" placeholder="$"><button class="btn small" data-act="bill-add">Add</button></div>
-  </section>
+    <div class="add-row"><input id="bill-day" class="mini" inputmode="numeric" placeholder="Day"><input id="bill-name" placeholder="New bill"><input id="bill-amt" class="mini" inputmode="decimal" placeholder="$"><button class="btn small" data-act="bill-add">Add</button></div>`)}
+
+  ${fold('tags', 'Stores & tags', '', `<h3>Stores</h3><div class="chips">${(h.stores || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="stores" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
+    <div class="add-row"><input id="stores-new" placeholder="Add a store"><button class="btn small" data-act="list-add" data-kind="stores">Add</button></div>
+    <h3>Tags</h3><p class="small muted">For tracking things inside a category — like Diapers (in Twins) or Eating out (in Food).</p>
+    <div class="chips">${(h.tags || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="tags" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
+    <div class="add-row"><input id="tags-new" placeholder="Add a tag"><button class="btn small" data-act="list-add" data-kind="tags">Add</button></div>`)}
 
   ${monthlyTotalCard()}
 
+  <a class="card menu-row" href="#/settings/setup"><span><b>Setup</b><span class="small muted">Your name, people & income, features, how you track spending, savings goals, household</span></span><span class="chev">›</span></a>`;
+}
+
+// A Settings card that opens and closes with the arrow in its header (remembered on this device).
+function fold(key, title, summary, body) {
+  const open = S.setOpen[key] !== undefined ? S.setOpen[key] : key !== 'tags';
+  return `<section class="card fold ${open ? '' : 'shut'}">
+    <button class="fold-head" data-act="fold" data-k="${key}" aria-expanded="${open}"><h2>${title}</h2><span class="fold-sum">${open ? '' : summary}</span><span class="fold-arrow">${open ? '▲' : '▼'}</span></button>
+    ${open ? body : ''}
+  </section>`;
+}
+
+function viewSettingsSetup() {
+  const h = H();
+  const sv = h.savings || {};
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Setup</h1></header>
+
+  <section class="card"><h2>You</h2>
+    <label class="field"><span class="label">Your name</span><input data-ch="myname" value="${esc(myName())}"></label>
+  </section>
+  <section class="card"><h2>People & usual income</h2>
+    ${Calc.earners(h).map(e => `<div class="edit-row"><input class="grow" data-ch="earner" data-id="${esc(e.id)}" value="${esc(e.name)}" aria-label="Name">${Calc.earners(h).length > 1 ? `<button class="x small" data-act="person-del" data-id="${esc(e.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+    <button class="linkish small" data-act="person-add">+ Add a person</button>
+    <h3>Usual monthly income</h3>
+    <div class="two">${Calc.earners(h).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input data-ch="usual" data-f="${esc(e.id)}" inputmode="decimal" value="${esc((h.usual || {})[e.id])}" placeholder="$"></label>`).join('')}</div>
+    <p class="small muted">Used on the Year tab for any month you haven’t filled in (shown as “usual”). Type a real amount on a month and it takes over.</p>
+  </section>
+  <section class="card"><h2>Features</h2>
+    ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
+      ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.'],
+      ['payInChecking', 'Paychecks land in checking', 'For paychecks that go straight into this checking account during the month (they’re for next month). Check each one off on Overview when it arrives so it’s set aside.']].map(([k, l, d]) => {
+      const on = k === 'overview' ? overviewOn() : !!feat(k);
+      return `<div class="line feature"><span><b>${l}</b><span class="small muted">${d}</span></span><button class="switch ${on ? 'on' : ''}" data-act="feature" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${l}"><i></i></button></div>`;
+    }).join('')}
+  </section>
   <section class="card"><h2>How we track spending</h2>
     <div class="seg">${[['log', 'Log as we go'], ['import', 'Weekly import']].map(([k, l]) => `<button class="${(h.trackMode || 'log') === k ? 'on' : ''}" data-act="track" data-v="${k}">${l}</button>`).join('')}</div>
     <p class="small muted">${(h.trackMode || 'log') === 'import'
@@ -1269,24 +1315,6 @@ function viewSettings() {
         <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
         <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
   </section>
-
-  <section class="card"><h2>Features</h2>
-    ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
-      ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.'],
-      ['payInChecking', 'Paychecks land in checking', 'For paychecks that go straight into this checking account during the month (they’re for next month). Check each one off on Overview when it arrives so it’s set aside.']].map(([k, l, d]) => {
-      const on = k === 'overview' ? overviewOn() : !!feat(k);
-      return `<div class="line feature"><span><b>${l}</b><span class="small muted">${d}</span></span><button class="switch ${on ? 'on' : ''}" data-act="feature" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${l}"><i></i></button></div>`;
-    }).join('')}
-  </section>
-
-  <section class="card"><h2>People & usual income</h2>
-    ${Calc.earners(h).map(e => `<div class="edit-row"><input class="grow" data-ch="earner" data-id="${esc(e.id)}" value="${esc(e.name)}" aria-label="Name">${Calc.earners(h).length > 1 ? `<button class="x small" data-act="person-del" data-id="${esc(e.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
-    <button class="linkish small" data-act="person-add">+ Add a person</button>
-    <h3>Usual monthly income</h3>
-    <div class="two">${Calc.earners(h).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input data-ch="usual" data-f="${esc(e.id)}" inputmode="decimal" value="${esc((h.usual || {})[e.id])}" placeholder="$"></label>`).join('')}</div>
-    <p class="small muted">Used on the Year tab for any month you haven’t filled in (shown as “usual”). Type a real amount on a month and it takes over.</p>
-  </section>
-
   <section class="card"><h2>Savings goals</h2>
     <div class="three">
       <label class="field"><span class="label">Keep in savings</span><input data-ch="goal" data-f="floor" inputmode="decimal" value="${esc(sv.floor)}"></label>
@@ -1294,18 +1322,28 @@ function viewSettings() {
       <label class="field"><span class="label">Goal</span><input data-ch="goal" data-f="goalMax" inputmode="decimal" value="${esc(sv.goalMax)}"></label>
     </div>
     <p class="small muted">At the end of the year, anything above “keep in savings” can move to the HYSA.</p>
+    <label class="field"><span class="label">Cushion to keep in checking</span><input data-ch="goal" data-f="buffer" inputmode="decimal" value="${esc(checkingBuffer())}"></label>
+    <p class="small muted">When you set up a month, only the Savings/Excess above this is suggested for moving to savings.</p>
     ${(sv.log || []).length ? `<details class="small"><summary>Savings history</summary>${[...sv.log].reverse().slice(0, 40).map(l => `<div class="line small"><span>${new Date(l.t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(l.note || l.kind)}</span><span>${l.kind === 'set' && l.note === 'Starting balance' ? money(l.amount) : (l.amount >= 0 ? '+' : '') + money(l.amount)}</span></div>`).join('')}</details>` : ''}
   </section>
+  <section class="card"><h2>Household</h2>
+    ${Store.configured ? `<p>Share this code with anyone joining this household (Create account → Join with a code):</p><div class="code">${esc(h.joinCode)}</div><button class="btn ghost small" data-act="copy-code">Copy code</button>` : '<p class="small muted">Sample mode — the join code appears here once Firebase is connected.</p>'}
+    <p class="small muted">In the household: ${Object.values(h.people || {}).map(p => esc(p.name)).join(', ')}</p>
+  </section>
+  ${Store.configured ? `<section class="card"><h2>Account</h2><p class="small muted">Signed in as ${esc(S.user && S.user.email)}</p><button class="btn ghost" data-act="signout">Sign out</button></section>` : ''}
+`;
+}
 
-  <section class="card"><h2>Look</h2>
-    <div class="two">
-      <label class="field"><span class="label">Heading font</span><select data-ch="font" data-f="heading">${Looks.headings.map(f => `<option ${f === (look.heading || 'Oswald') ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
-      <label class="field"><span class="label">Body font</span><select data-ch="font" data-f="body">${Looks.bodies.map(f => `<option ${f === (look.body || 'Nunito') ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
-    </div>
-    <p class="font-preview"><span class="h">October</span> <span>Spending money left: $1,250</span></p>
-    <label class="field check"><input type="checkbox" data-ch="calm" ${look.calm === false ? '' : 'checked'}> Calm touches & celebrations <span class="small muted">(gentle wording, confetti for wins)</span></label>
-    <label class="field"><span class="label">Card see-through <span class="small muted">(lower shows more wallpaper)</span></span><input type="range" min="0.45" max="1" step="0.05" data-ch="glass" value="${esc(look.glass === undefined ? 0.82 : look.glass)}"></label>
-    <h3>Months</h3><p class="small muted">Each month’s color and wallpaper. Tap a picture to change it.</p>
+function viewSettingsLook() {
+  if (B.loadAllWalls && !S.wallsLoaded) {
+    S.wallsLoaded = true;
+    B.loadAllWalls().then(all => { S.wallpapers = { ...all, ...S.wallpapers }; for (const k in all) S.wallpapers[k] = all[k]; render(); })
+      .catch(e => { S.wallsLoaded = false; console.warn('wallpapers', e); });
+  }
+  const look = H().look || {};
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Appearance</h1></header>
+
+  <section class="card"><h2>Months</h2><p class="small muted">Each month’s color and wallpaper. Tap a picture to change it.</p>
     <div class="month-grid">${D.MONTHS.map((m, i) => {
       const n = i + 1;
       const wp = S.wallpapers[String(n)];
@@ -1318,12 +1356,15 @@ function viewSettings() {
     <button class="linkish small" data-act="colors-reset">Reset month colors</button>
   </section>
 
-  <section class="card"><h2>Household</h2>
-    ${Store.configured ? `<p>Share this code with anyone joining this household (Create account → Join with a code):</p><div class="code">${esc(h.joinCode)}</div><button class="btn ghost small" data-act="copy-code">Copy code</button>` : '<p class="small muted">Sample mode — the join code appears here once Firebase is connected.</p>'}
-    <p class="small muted">In the household: ${Object.values(h.people || {}).map(p => esc(p.name)).join(', ')}</p>
-  </section>
-
-  ${Store.configured ? `<section class="card"><h2>Account</h2><p class="small muted">Signed in as ${esc(S.user && S.user.email)}</p><button class="btn ghost" data-act="signout">Sign out</button></section>` : ''}`;
+  <section class="card"><h2>Fonts & feel</h2>
+    <div class="two">
+      <label class="field"><span class="label">Heading font</span><select data-ch="font" data-f="heading">${Looks.headings.map(f => `<option ${f === (look.heading || 'Oswald') ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
+      <label class="field"><span class="label">Body font</span><select data-ch="font" data-f="body">${Looks.bodies.map(f => `<option ${f === (look.body || 'Nunito') ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
+    </div>
+    <p class="font-preview"><span class="h">October</span> <span>Spending money left: $1,250</span></p>
+    <label class="field check"><input type="checkbox" data-ch="calm" ${look.calm === false ? '' : 'checked'}> Calm touches & celebrations <span class="small muted">(gentle wording, confetti for wins)</span></label>
+    <label class="field"><span class="label">Card see-through <span class="small muted">(lower shows more wallpaper)</span></span><input type="range" min="0.45" max="1" step="0.05" data-ch="glass" value="${esc(look.glass === undefined ? 0.82 : look.glass)}"></label>
+  </section>`;
 }
 
 // The amounts in Settings added up (bills + category budgets), so there's a
@@ -1577,20 +1618,6 @@ const acts = {
     box.dataset.dir = el.dataset.v;
     box.querySelectorAll('[data-act="mdir"]').forEach(b => b.classList.toggle('on', b === el));
   },
-  move: async () => {
-    const v = readMove('rev');
-    if (!v) { toast('Type the amount you moved'); return; }
-    const ok = await ask(v >= 0 ? `Moved ${money(v)} from checking to savings?` : `Took ${money(-v)} from savings into checking?`, 'Yes');
-    if (!ok) return;
-    const ym = homeYm();
-    const finish = async tx => {
-      await B.setMonth(ym, { moved: v });
-      await setSavings((Number(H().savings.actual) || 0) + v, `${D.name(ym)} excess`, v >= 0 ? 'in' : 'out');
-      if (tx && tx.length) await addBucketTx(tx);
-      if (v > 0) confetti();
-    };
-    if (bucketsOn() && (H().buckets || []).length) openAllocate(v, finish); else await finish();
-  },
 
   // Line the buckets back up with the savings total (the total doesn't change).
   assign: el => {
@@ -1691,6 +1718,7 @@ const acts = {
   yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
   'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
+  fold: el => { const k = el.dataset.k; S.setOpen[k] = el.getAttribute('aria-expanded') !== 'true'; try { localStorage.setItem('ne-set-open', JSON.stringify(S.setOpen)); } catch (e) {} render(); },
   plan: el => openPlan(el.dataset.ym),
   left: el => {
     const cat = el.dataset.cat;
@@ -1802,6 +1830,7 @@ const acts = {
   },
   'd-in-add': () => { readDraftInputs(); S.draft.incoming.push({ id: newId(), name: `Paycheck ${S.draft.incoming.length + 1}`, amount: 0, received: false }); render(); },
   'd-finish': el => finishSetup(el.dataset.mode),
+  'd-showmove': () => { readDraftInputs(); S.draft.showMove = true; render(); },
 
   'cat-add': async () => {
     const name = $('#cat-name').value.trim();
@@ -1821,9 +1850,13 @@ const acts = {
   },
   'list-add': async el => {
     const kind = el.dataset.kind;
-    const v = $(`#${kind}-new`).value.trim();
-    if (!v || (H()[kind] || []).includes(v)) return;
+    const inp = $(`#${kind}-new`);
+    const v = inp.value.trim();
+    if (!v) return;
+    const have = (H()[kind] || []).find(x => x.toLowerCase() === v.toLowerCase());
+    if (have) { toast(`“${have}” is already on your ${kind === 'tags' ? 'tags' : 'stores'} list`); inp.value = ''; return; }
     await B.setH([[[kind], [...(H()[kind] || []), v]]]);
+    toast(`Added “${v}”`);
   },
   'list-del': async el => { const kind = el.dataset.kind; await B.setH([[[kind], (H()[kind] || []).filter(x => x !== el.dataset.v)]]); },
   'bill-add': async () => {
