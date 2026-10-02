@@ -470,9 +470,18 @@ async function monthList(kind, fn) {
 
 /* ---------- Year ---------- */
 
+// The first year this household has anything in the app (no going back past it).
+function firstYear() {
+  const yms = [...Object.keys(H().plans || {}), ...Object.keys(S.months || {})].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  const years = [D.yearOf(homeYm())];
+  if (yms.length) years.push(D.yearOf(yms[0]));
+  if (H().created) years.push(new Date(H().created).getFullYear());
+  return Math.min(...years);
+}
+
 function viewYear() {
   const hy = D.yearOf(homeYm());
-  const Y = S.year || hy;
+  const Y = Math.max(S.year || hy, firstYear());
   const y = Calc.year(H(), S.months, Y, S.purchases, homeYm());
   const sv = H().savings || {};
   const actual = Number(sv.actual) || 0;
@@ -505,7 +514,7 @@ function viewYear() {
   const ahead = shown.filter(r => !r.past);
   const arrowYms = (allOpen || !ahead.length ? shown : ahead).map(r => r.ym);
   return `
-  <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year">‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
+  <header class="hero small-hero ink-title"><div class="row between"><button class="nav" data-act="yr" data-d="-1" aria-label="Previous year" ${Y <= firstYear() ? 'style="visibility:hidden" disabled' : ''}>‹</button><h1>${Y}</h1><button class="nav" data-act="yr" data-d="1" aria-label="Next year">›</button></div></header>
   <section class="card ${bucketsOn() && showActual ? 'tap-card' : ''}" ${bucketsOn() && showActual ? 'role="button" tabindex="0" data-act="go-savings"' : ''}>
     <div class="row between"><span class="label">Savings${showActual ? ' right now' : ''}</span><button class="linkish small" data-act="savings">Update</button></div>
     <div class="big-num">${money(showActual ? actual : proj || 0)}</div>
@@ -1717,7 +1726,7 @@ const acts = {
     await B.setH([[['features', k], on]]);
   },
   'setup-file': () => pickSetupFile(async data => { await Demo.loadSetup(data); toast('Setup file loaded'); }),
-  yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
+  yr: el => { S.year = Math.max(firstYear(), (S.year || D.yearOf(homeYm())) + Number(el.dataset.d)); render(); },
   'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
   fold: el => { const k = el.dataset.k; S.setOpen[k] = el.getAttribute('aria-expanded') !== 'true'; render(); },
