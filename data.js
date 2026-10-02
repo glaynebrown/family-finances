@@ -155,6 +155,8 @@ const Calc = (() => {
     const o = M && M.bills && M.bills[bill.id];
     // Bills paid by hand (autopay off) never check themselves off.
     const self = bill.autopay === false;
+    // Already out of checking when the balance was typed (so it isn't subtracted again).
+    if (o && o.pre) return { paid: true, at: 0, manual: false, pre: true, self, due, late: false };
     if (o && o.manual) return { paid: !!o.paid, at: o.at || due, manual: !self, self, due, late: !o.paid && now >= due };
     if (self) return { paid: false, at: due, manual: false, self, due, late: now >= due };
     return { paid: now >= due, at: due, manual: false, due, late: false };
@@ -224,7 +226,7 @@ const Calc = (() => {
       const st = billStatus(M, b, ym, now);
       const charge = billCharge(M, b, ym);
       const ours = billAmount(b, ym, M);
-      if (st.paid && st.at > at) { est -= charge; since.push({ what: b.name, amount: -charge }); }
+      if (st.paid && st.at > at) { est -= charge; since.push({ what: b.name, amount: -charge, kind: 'bill', id: b.id }); }
       if (!st.paid) billsLeft += ours;
       for (const h of heldFor(M, b.id)) {
         if (!st.paid && h.received) heldBack += Number(h.amount) || 0;
@@ -234,23 +236,23 @@ const Calc = (() => {
     });
     let otherLeft = 0;
     for (const o of M.other || []) {
-      if (o.paid && (o.paidAt || 0) > at) { est -= Number(o.amount) || 0; since.push({ what: o.name, amount: -o.amount }); }
+      if (o.paid && (o.paidAt || 0) > at) { est -= Number(o.amount) || 0; since.push({ what: o.name, amount: -o.amount, kind: 'other', id: o.id }); }
       if (!o.paid) otherLeft += Number(o.amount) || 0;
     }
     let backIn = 0;
     for (const b of M.back || []) {
-      if (b.received && (b.receivedAt || 0) > at) { est += Number(b.amount) || 0; since.push({ what: b.name, amount: +b.amount }); }
+      if (b.received && (b.receivedAt || 0) > at) { est += Number(b.amount) || 0; since.push({ what: b.name, amount: +b.amount, kind: 'back', id: b.id }); }
       if (!b.received) backIn += Number(b.amount) || 0;
     }
     for (const h of M.held || []) {
-      if (h.received && (h.receivedAt || 0) > at) { est += Number(h.amount) || 0; since.push({ what: `From ${h.name}`, amount: +h.amount }); }
+      if (h.received && (h.receivedAt || 0) > at) { est += Number(h.amount) || 0; since.push({ what: `From ${h.name}`, amount: +h.amount, kind: 'held', id: h.id }); }
     }
     // Paychecks that land in checking during the month are next month's money:
     // once one arrives it's set aside so it doesn't look like extra this month.
     let nextPay = 0;
     for (const x of M.incoming || []) {
       if (!x.received) continue;
-      if ((x.receivedAt || 0) > at) { est += Number(x.amount) || 0; since.push({ what: x.name || 'Paycheck', amount: +x.amount }); }
+      if ((x.receivedAt || 0) > at) { est += Number(x.amount) || 0; since.push({ what: x.name || 'Paycheck', amount: +x.amount, kind: 'incoming', id: x.id }); }
       nextPay += Number(x.amount) || 0;
     }
     let purchased = 0;

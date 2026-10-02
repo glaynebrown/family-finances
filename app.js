@@ -376,7 +376,8 @@ function billsSections() {
   <section class="card checklist">
     ${checking}
     ${c.since.length ? `<button class="linkish small" data-act="since">${S.sinceOpen ? 'Hide' : 'What changed since then?'}</button>
-      ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}</div>` : ''}` : ''}
+      ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}${s.kind ? ` <button class="linkish small" data-act="since-pre" data-kind="${s.kind}" data-id="${esc(s.id)}">already in that balance</button>` : ''}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}
+        <p class="small muted">Something here was already in the balance you typed? Tap “already in that balance” so it isn’t counted twice.</p></div>` : ''}` : ''}
     ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
     ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
@@ -403,7 +404,7 @@ function billsSections() {
       return `<div class="check-row ${b.paid ? 'done' : ''} ${hs.length ? 'has-shares' : ''}">
         <button class="box ${b.paid ? 'on' : ''}" data-act="bill" data-id="${esc(b.id)}" aria-label="Paid">${b.paid ? '✓' : ''}</button>
         <span class="day">${D.ordinal(b.day)}</span>
-        <span class="grow"><span>${esc(b.name)}${charged}</span>${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
+        <span class="grow"><span>${esc(b.name)}${charged}</span>${b.self && !b.paid ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? `⚠️ due the ${D.ordinal(b.day)}` : 'you pay this one'}</span>` : ''}${b.pre ? `<span class="small muted">already out when you updated checking · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">undo</button></span>` : ''}${b.manual ? `<span class="small ${b.late ? 'warn' : 'muted'}">${b.late ? '⚠️ unchecked by hand' : 'set by hand'} · <button class="linkish small" data-act="bill-auto" data-id="${esc(b.id)}">back to automatic</button></span>` : ''}</span>
         <span class="bill-amt">${Math.abs(b.amountNow - b.normal) > 0.004 ? `<span class="small muted">normally ${money(b.normal)}</span>` : ''}<button class="val-edit" data-act="bill-amt" data-id="${esc(b.id)}" aria-label="Change this month's amount">${money(b.amountNow)}</button></span>
         ${extra}
       </div>`;
@@ -1786,6 +1787,15 @@ const acts = {
     // hand, paid on its due date if that's passed (so checking isn't charged twice).
     const auto = Date.now() >= st.due;
     await B.setMonthField(ym, ['bills', b.id], paid === auto ? B.DEL : { paid, at: Math.min(Date.now(), st.due), manual: true });
+  },
+  // It was already out of (or in) checking when the balance was typed: stop counting it again.
+  'since-pre': async el => {
+    const { kind, id } = el.dataset;
+    const ym = homeYm();
+    if (kind === 'bill') { await B.setMonthField(ym, ['bills', id], { pre: true }); return; }
+    const at = ((S.months[ym] || {}).checking || {}).at || 0;
+    const key = kind === 'other' ? 'paidAt' : 'receivedAt';
+    await monthList(kind, arr => arr.map(o => (o.id === id ? { ...o, [key]: at } : o)));
   },
   'bill-auto': async el => { await B.setMonthField(homeYm(), ['bills', el.dataset.id], B.DEL); },
   'li-toggle': async el => {
