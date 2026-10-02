@@ -11,7 +11,7 @@ const S = {
   gotH: false, gotM: false, gotP: false,
   bdYm: null, bdTab: 'cat', year: null, open: {}, sinceOpen: false,
   draft: null, pending: false, openShares: {}, adding: null,
-  setOpen: (() => { try { return JSON.parse(localStorage.getItem('ne-set-open')) || {}; } catch (e) { return {}; } })(),
+  setOpen: {},
   hideDone: (() => { try { return localStorage.getItem('ne-hide') === '1'; } catch (e) { return false; } })(),
   page: (() => { try { return localStorage.getItem('ne-page') === 'budgets' ? 'budgets' : 'overview'; } catch (e) { return 'overview'; } })(),
 };
@@ -220,8 +220,10 @@ function drawTabs(r) {
     + `<a href="#/home" class="money ${on('home')}" aria-label="Home">${icons.home}</a>`
     + `<a href="#/year" class="${on('year')}">${icons.year}<span>Year</span></a>`;
 }
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', e => {
   window.scrollTo(0, 0);
+  // Coming into Settings from another screen: every section starts collapsed.
+  if (route() === 'settings' && !/#\/settings/.test(e.oldURL || '')) S.setOpen = {};
   if (sheetOpen()) { S.sheet = null; $('#sheet-wrap').hidden = true; $('#sheet-wrap').classList.remove('on'); }
   render();
 });
@@ -1273,9 +1275,9 @@ function viewSettings() {
   <a class="card menu-row" href="#/settings/setup"><span><b>Setup</b><span class="small muted">Your name, people & income, features, how you track spending, savings goals, household</span></span><span class="chev">›</span></a>`;
 }
 
-// A Settings card that opens and closes with the arrow in its header (remembered on this device).
+// A Settings card that opens and closes with the arrow in its header (all start closed when you come into Settings).
 function fold(key, title, summary, body) {
-  const open = S.setOpen[key] !== undefined ? S.setOpen[key] : key !== 'tags';
+  const open = !!S.setOpen[key];
   return `<section class="card fold ${open ? '' : 'shut'}">
     <button class="fold-head" data-act="fold" data-k="${key}" aria-expanded="${open}"><h2>${title}</h2><span class="fold-sum">${open ? '' : summary}</span><span class="fold-arrow">${open ? '▲' : '▼'}</span></button>
     ${open ? body : ''}
@@ -1718,7 +1720,7 @@ const acts = {
   yr: el => { S.year = (S.year || D.yearOf(homeYm())) + Number(el.dataset.d); render(); },
   'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
-  fold: el => { const k = el.dataset.k; S.setOpen[k] = el.getAttribute('aria-expanded') !== 'true'; try { localStorage.setItem('ne-set-open', JSON.stringify(S.setOpen)); } catch (e) {} render(); },
+  fold: el => { const k = el.dataset.k; S.setOpen[k] = el.getAttribute('aria-expanded') !== 'true'; render(); },
   plan: el => openPlan(el.dataset.ym),
   left: el => {
     const cat = el.dataset.cat;
