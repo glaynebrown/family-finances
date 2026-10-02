@@ -430,3 +430,16 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 /* Shared bill: transfer chips get their own full-width line under the bill */
 .check-row.has-shares { flex-wrap: wrap; row-gap: 4px; }
 .check-row.has-shares > .shares { flex-basis: 100%; padding-left: 40px; margin-top: 0; }
+
+/* Set up next year */
+.setup .change { margin: 0 0 6px 12px; }
+.ny-add { flex-wrap: wrap; }
+.ny-add select { flex: 1 1 40%; min-width: 0; }
+.ny-pick { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ny-pick select { flex: 1; min-width: 0; }
+.ny-pick .seg { flex: 1; margin: 0; flex-wrap: nowrap; }
+.ny-pick .seg button { padding: 8px 6px; }
+.ny-month { margin: 10px 0; }
+.ny-month .label { margin-bottom: 2px; }
+.ny-item .mini { width: 84px; }
+.ny-sug .btn { padding: 4px 12px; }

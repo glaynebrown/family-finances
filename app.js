@@ -166,7 +166,7 @@ function render(force) {
   if (!H()) return;
   applyLook();
   const r = route();
-  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, settings: viewSettings, import: viewImport, savings: viewSavings };
+  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, newyear: viewNewYear, settings: viewSettings, import: viewImport, savings: viewSavings };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
   // Keep anything typed in "add" boxes (and which one had focus) across a redraw.
@@ -215,7 +215,7 @@ document.addEventListener('focusout', e => {
 function drawTabs(r) {
   const t = $('#tabs');
   t.hidden = false;
-  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'year' && r === 'savings') || (id === 'review' && r === 'setup') ? 'on' : '');
+  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'year' && r === 'savings') || (id === 'review' && (r === 'setup' || r === 'newyear')) ? 'on' : '');
   t.innerHTML = `<a href="#/review" class="${on('review')}">${icons.review}<span>Review</span></a>`
     + `<a href="#/home" class="money ${on('home')}" aria-label="Home">${icons.home}</a>`
     + `<a href="#/year" class="${on('year')}">${icons.year}<span>Year</span></a>`;
@@ -543,8 +543,8 @@ function yearCard(r) {
   const prevName = D.short(D.addMonths(r.ym, -1));
   const hint = { auto: `${prevName} income − expenses − other${r.elevate ? ' + additional' : ''}`, live: 'from this month’s checklist', moved: 'moved at setup', set: 'set by you', noincome: `add ${prevName} income to estimate` }[r.kind] || '';
   const p = r.plan || {};
-  // ElevateEMS pay is additional income in that same month (not a paycheck for next month).
-  const elev = r.elevate ? eline(`Additional income${p.elevateName ? ` <span class="small muted">${esc(p.elevateName)}</span>` : ''}`, r.elevate, 'elevate') : '';
+  // Additional income (OT, academy pay…) counts in that same month (not a paycheck for next month).
+  const elev = (r.extras || []).map(x => line(`<span class="muted">Additional:</span> ${esc(x.name)}`, x.amount)).join('');
   const elevBtn = '';
   return `<section class="mcard card ${r.current ? 'current' : ''}">
     <button class="plain" data-act="expand" data-ym="${r.ym}" data-open="1" aria-expanded="true">${head}</button>
@@ -568,7 +568,7 @@ function yearCard(r) {
 function openPlan(ym) {
   const p = (H().plans || {})[ym] || {};
   const y = Calc.year(H(), S.months, D.yearOf(ym), S.purchases, homeYm()).rows.find(r => r.ym === ym);
-  S.plan = { ym, other: (p.other || []).map(o => ({ ...o })) };
+  S.plan = { ym, other: (p.other || []).map(o => ({ ...o })), extra: Calc.extras(p).map(x => ({ ...x, id: x.id === 'elevate' ? newId() : x.id })) };
   const auto = (() => {
     const M = S.months[ym];
     return (H().bills || []).reduce((s, b) => s + Calc.billAmount(b, ym, M), 0) + (H().categories || []).reduce((s, c) => s + Calc.budgetFor(H(), M, c, ym), 0);
@@ -577,11 +577,11 @@ function openPlan(ym) {
   S.sheet = 'plan';
   openSheet(`<div class="sheet-head"><h2>${D.label(ym)}</h2><button class="x" data-act="close">×</button></div>
     <div class="two">${Calc.earners(H()).map(e => `<label class="field"><span class="label">${esc(e.name)} income</span><input id="p-pay-${esc(e.id)}" inputmode="decimal" value="${v(p[e.id])}"></label>`).join('')}</div>
-    <div class="two"><label class="field"><span class="label">Additional income <span class="muted small">(one-time, this month)</span></span><input id="p-elevate" inputmode="decimal" placeholder="$" value="${v(p.elevate)}"></label>
-    <label class="field"><span class="label">What is it?</span><input id="p-elevname" placeholder="e.g. OT" value="${esc(p.elevateName || '')}"></label></div>
+    <div class="field"><span class="label">Additional income <span class="muted small">(one-time, this month)</span></span><div id="p-extra">${planListHtml('extra')}</div>
+      <div class="add-row"><input id="p-xname" placeholder="e.g. OT"><input id="p-xamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-xadd">Add</button></div></div>
     <p class="small muted">Additional income goes into ${D.name(ym)}’s savings and shows up on its checklist when you set it up — it isn’t next month’s income.</p>
     <label class="field"><span class="label">Expenses <span class="muted small">(bills + budgets ≈ ${money(auto)})</span></span><input id="p-exp" inputmode="decimal" placeholder="${auto}" value="${v(p.expenses)}"></label>
-    <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planOtherHtml()}</div>
+    <div class="field"><span class="label">Other expenses (one-time: travel, Xmas, birthdays…)</span><div id="p-other">${planListHtml('other')}</div>
       <div class="add-row"><input id="p-oname" placeholder="What"><input id="p-oamt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="p-oadd">Add</button></div></div>
     ${S.months[ym] && S.months[ym].setup
       ? `<p class="small muted">${D.name(ym)} is already set up — change its budgets on the Budgets page.</p>`
@@ -591,7 +591,16 @@ function openPlan(ym) {
     <label class="field"><span class="label">Note</span><input id="p-note" value="${esc(p.note || '')}"></label>
     <div class="row end sheet-foot"><button class="btn" data-act="p-save">Save</button></div>`);
 }
-const planOtherHtml = () => S.plan.other.map(o => `<div class="line"><span>${esc(o.name)}</span><span><b>${money(o.amount)}</b> <button class="x small" data-act="p-odel" data-id="${esc(o.id)}">×</button></span></div>`).join('') || '<p class="muted small">None</p>';
+const planListHtml = kind => S.plan[kind].map(o => `<div class="line"><span>${esc(o.name)}</span><span><b>${money(o.amount)}</b> <button class="x small" data-act="p-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></span></div>`).join('') || '<p class="muted small">None</p>';
+
+function planAdd(kind, nameSel, amtSel) {
+  const name = $(nameSel).value.trim();
+  const amount = num($(amtSel).value);
+  if (!name || !amount) { toast('Add a name and an amount'); return; }
+  S.plan[kind].push({ id: newId(), name, amount });
+  $(`#p-${kind}`).innerHTML = planListHtml(kind);
+  $(nameSel).value = ''; $(amtSel).value = '';
+}
 
 async function savePlan() {
   const ym = S.plan.ym;
@@ -600,9 +609,8 @@ async function savePlan() {
   const p = {
     ...old,
     ...Object.fromEntries(Calc.earners(H()).map(e => [e.id, val(`#p-pay-${e.id}`)])),
-    elevate: val('#p-elevate'), elevateName: $('#p-elevname').value.trim() || null,
-    elevateToSavings: true, expenses: val('#p-exp'), savings: val('#p-sav'),
-    other: S.plan.other, note: $('#p-note').value.trim(),
+    expenses: val('#p-exp'), savings: val('#p-sav'),
+    other: S.plan.other, extra: S.plan.extra, note: $('#p-note').value.trim(),
     budgets: (() => {
       const out = {};
       for (const c of H().categories) {
@@ -615,9 +623,19 @@ async function savePlan() {
     })(),
   };
   for (const k of Object.keys(p)) if (p[k] === null) delete p[k];
+  delete p.elevate; delete p.elevateName; delete p.elevateToSavings;
   closeSheet();
   await B.setH([[['plans', ym], p]]);
   toast(`${D.name(ym)} saved`);
+}
+
+// Raises / job changes: a new usual income starting a given month.
+function usualChangesHtml(fromYm) {
+  const people = Calc.earners(H());
+  const nameOf = id => (people.find(e => e.id === id) || {}).name || '?';
+  const list = (H().usualChanges || []).filter(c => !fromYm || c.from >= fromYm).sort((a, b) => (a.from < b.from ? -1 : 1));
+  return `${list.map(c => `<div class="small muted change">→ ${esc(nameOf(c.earner))} ${money(c.amount)} starting ${D.label(c.from)} <button class="linkish small" data-act="uc-del" data-id="${esc(c.id)}">remove</button></div>`).join('')}
+    <details class="small"><summary>Expecting a change? (raise, new job)</summary><div class="add-row">${people.length > 1 ? `<select id="uc-who">${people.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>` : ''}<input type="month" id="uc-m" value="${fromYm || D.addMonths(homeYm(), 1)}"><input id="uc-a" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="uc-add">Add</button></div></details>`;
 }
 
 async function setSavings(newVal, note, kind = 'set') {
@@ -656,25 +674,13 @@ function readMove(key) {
   return box.dataset.dir === 'out' ? -Math.abs(v) : Math.abs(v);
 }
 
-// Every December (and January, in case it slips): move anything above the
-// savings floor to the HYSA, then look ahead to the next year.
-function hysaCard() {
-  if (bucketsOn()) return '';
-  const now = D.curYm();
-  const m = D.monthNum(now);
+// December and January: plan the coming year (savings recap / HYSA first), until it's done.
+function newYearCard() {
+  const m = D.monthNum(D.curYm());
   if (m !== 12 && m !== 1) return '';
-  const Y = m === 12 ? D.yearOf(now) : D.yearOf(now) - 1;
-  const sv = H().savings || {};
-  if ((sv.hysaDone || {})[Y]) return '';
-  const floor = Number(sv.floor) || 5000;
-  const actual = Number(sv.actual) || 0;
-  const extra = round2(actual - floor);
-  return `<section class="card move-card hysa-card">
-    <div class="line"><span><b>Year-end: transfer to HYSA</b></span><b>${extra > 0 ? money(extra) : '—'}</b></div>
-    <p class="small muted">${extra > 0 ? `Savings is ${money(actual)} — ${money(extra)} above your ${money(floor)} floor. Move that to the HYSA (or type what you actually moved), then tap below.` : `Savings is at or under your ${money(floor)} floor. Type an amount if you moved anything anyway.`}</p>
-    <label class="amount move-amt"><span>$</span><input id="mv-hysa" inputmode="decimal" value="${Math.max(0, extra)}" data-actual="${actual}" data-y="${Y}" aria-label="Amount moved to HYSA"></label>
-    <button class="btn full" data-act="hysa" data-y="${Y}">Reset savings to <span id="hysa-left">${money(actual - Math.max(0, extra))}</span> and review ${Y + 1}</button>
-  </section>`;
+  const Y = nyYear();
+  if ((H().nyDone || {})[Y]) return '';
+  return `<a class="card setup-link ny-link" href="#/newyear"><span class="grow"><b>Set up ${Y}</b><span class="small muted">${bucketsOn() ? 'Savings recap' : 'Savings recap & HYSA'}, then budgets, bills, income and one-time money for the year</span></span><i>›</i></a>`;
 }
 
 function viewReview() {
@@ -700,7 +706,7 @@ function viewReview() {
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
   const n = nextSetupYm();
   return `<header class="hero small-hero"><h1>Review</h1></header>
-  ${hysaCard()}
+  ${newYearCard()}
   <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
   <h2 class="section-title">Breakdown</h2>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
@@ -1060,18 +1066,18 @@ function startDraft() {
     const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
     d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
     d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b, carried: true }));
-    if (Number(plan.elevate) > 0) d.back.push({ id: newId(), name: plan.elevateName || 'Additional income', amount: Number(plan.elevate), received: false });
+    for (const x of Calc.extras(plan)) if (Number(x.amount) > 0) d.back.push({ id: newId(), name: x.name, amount: Number(x.amount), received: false });
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
   }
   for (const c of H().categories) if (d.budgets[c.id] === undefined) d.budgets[c.id] = Calc.budgetFor(H(), null, c, N);
   // Starts from the Year tab: the month's own amount, else the usual income.
-  d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? (H().usual || {})[e.id] ?? '']));
+  d.pay = Object.fromEntries(Calc.earners(H()).map(e => [e.id, plan[e.id] ?? Calc.usualFor(H(), e.id, N) ?? '']));
   // Paid every two weeks into checking: start with two paychecks splitting the
   // planned (or usual) amount; amounts are editable and a third can be added.
   if (payInChecking()) {
     const e = Calc.earners(H())[0];
-    const monthly = Number(plan[e.id]) || Number((H().usual || {})[e.id]) || 0;
+    const monthly = Number(plan[e.id]) || Number(Calc.usualFor(H(), e.id, N)) || 0;
     const half = round2(monthly / 2);
     d.incoming = MN && MN.setup && MN.incoming ? MN.incoming.map(x => ({ ...x }))
       : [{ id: newId(), name: 'Paycheck 1', amount: half, received: false }, { id: newId(), name: 'Paycheck 2', amount: round2(monthly - half), received: false }];
@@ -1233,6 +1239,216 @@ async function finishSetup(mode) {
   toast(`${D.name(N)} is set up${M.moved > 0 ? ` · ${money(M.moved)} to savings` : M.moved < 0 ? ` · ${money(-M.moved)} from savings` : ''}`);
 }
 
+/* ---------- Set up next year (December / January, from Review) ---------- */
+
+const NY_STEPS = ['Savings recap', 'Budgets', 'Bills', 'Income', 'One-time money', 'Your year'];
+
+// The year being planned: next year in December, this year in January.
+function nyYear() {
+  const now = D.curYm();
+  return D.monthNum(now) === 12 ? D.yearOf(now) + 1 : D.yearOf(now);
+}
+const nyMonths = Y => Array.from({ length: 12 }, (_, i) => `${Y}-${D.pad(i + 1)}`);
+
+function startNY() {
+  const h = H();
+  const Y = nyYear();
+  const jan = `${Y}-01`;
+  const plans = h.plans || {};
+  const sv = h.savings || {};
+  const extra = Math.max(0, round2((Number(sv.actual) || 0) - (Number(sv.floor) || 5000)));
+  const ny = {
+    Y, step: 0, moved: extra,
+    budgets: Object.fromEntries(h.categories.map(c => [c.id, Number(c.budget) || 0])),
+    bills: Object.fromEntries((h.bills || []).map(b => [b.id, Calc.billNormal(b, jan)])),
+    billChanges: [],
+    usual: Object.fromEntries(Calc.earners(h).map(e => [e.id, Calc.usualFor(h, e.id, jan) ?? ''])),
+    usualChanges: [],
+    plans: {},
+    addMonth: jan, addKind: 'other',
+    goals: { goalMin: Number(sv.goalMin) || 5000, goalMax: Number(sv.goalMax) || 10000 },
+  };
+  for (const ym of nyMonths(Y)) {
+    const p = plans[ym] || {};
+    ny.plans[ym] = { other: (p.other || []).map(o => ({ ...o, id: o.id || newId() })), extra: Calc.extras(p).map(x => ({ ...x, id: x.id === 'elevate' ? newId() : x.id || newId() })) };
+  }
+  S.ny = ny;
+}
+
+// Last year's one-time items, same months, that aren't already planned.
+function nySuggestions(ny) {
+  const plans = H().plans || {};
+  const out = [];
+  for (const ym of nyMonths(ny.Y)) {
+    const last = plans[`${ny.Y - 1}-${ym.slice(5)}`] || {};
+    const have = k => new Set(ny.plans[ym][k].map(o => String(o.name).trim().toLowerCase()));
+    for (const [k, list] of [['other', last.other || []], ['extra', Calc.extras(last)]]) {
+      const h = have(k);
+      for (const o of list) if (Number(o.amount) && !h.has(String(o.name).trim().toLowerCase())) out.push({ key: `${ym}|${k}|${o.name}`, ym, kind: k, name: o.name, amount: Number(o.amount) });
+    }
+  }
+  return out;
+}
+
+// Household with the walkthrough's changes applied, for the projection and for saving.
+function nyApplied(ny) {
+  const h = JSON.parse(JSON.stringify(H()));
+  const jan = `${ny.Y}-01`;
+  const addChange = (list, c, same) => [...(list || []).filter(x => !same(x)), c].sort((a, b) => (a.from < b.from ? -1 : 1));
+  h.categories = h.categories.map(c => ({ ...c, budget: num(ny.budgets[c.id]) ?? (Number(c.budget) || 0) }));
+  h.bills = (h.bills || []).map(b => {
+    let changes = b.changes || [];
+    const v = num(ny.bills[b.id]);
+    if (v !== null && Math.abs(v - Calc.billNormal(b, jan)) > 0.004) changes = addChange(changes, { from: jan, amount: v }, x => x.from === jan);
+    for (const c of ny.billChanges.filter(x => x.bill === b.id)) changes = addChange(changes, { from: c.from, amount: c.amount }, x => x.from === c.from);
+    return { ...b, changes };
+  });
+  let uc = h.usualChanges || [];
+  for (const e of Calc.earners(h)) {
+    const v = num(ny.usual[e.id]);
+    const cur = Calc.usualFor(H(), e.id, jan);
+    if (v !== null && Math.abs(v - (Number(cur) || 0)) > 0.004) {
+      if (cur === undefined || cur === null || cur === '') h.usual = { ...(h.usual || {}), [e.id]: v };
+      else uc = addChange(uc, { id: newId(), earner: e.id, from: jan, amount: v }, x => x.earner === e.id && x.from === jan);
+    }
+  }
+  for (const c of ny.usualChanges) uc = addChange(uc, { ...c }, x => x.earner === c.earner && x.from === c.from);
+  h.usualChanges = uc;
+  h.plans = h.plans || {};
+  for (const ym of nyMonths(ny.Y)) {
+    const p = { ...(h.plans[ym] || {}), other: ny.plans[ym].other, extra: ny.plans[ym].extra };
+    delete p.elevate; delete p.elevateName; delete p.elevateToSavings;
+    h.plans[ym] = p;
+  }
+  h.savings = { ...(h.savings || {}), ...ny.goals };
+  if (!bucketsOn()) h.savings.actual = round2((Number(h.savings.actual) || 0) - (num(ny.moved) || 0));
+  return h;
+}
+
+function readNYInputs() {
+  const ny = S.ny;
+  const v = sel => { const el = view.querySelector(sel); return el ? el.value : undefined; };
+  const m = v('#ny-moved'); if (m !== undefined) ny.moved = m;
+  for (const c of H().categories) { const x = v(`#ny-b-${c.id}`); if (x !== undefined) ny.budgets[c.id] = x; }
+  for (const b of H().bills || []) { const x = v(`#ny-bill-${b.id}`); if (x !== undefined) ny.bills[b.id] = x; }
+  for (const e of Calc.earners(H())) { const x = v(`#ny-u-${e.id}`); if (x !== undefined) ny.usual[e.id] = x; }
+  for (const k of ['goalMin', 'goalMax']) { const x = v(`#ny-${k}`); if (x !== undefined && num(x) !== null) ny.goals[k] = num(x); }
+  view.querySelectorAll('[data-ny-item]').forEach(el => {
+    const [ym, kind, id] = el.dataset.nyItem.split('|');
+    const o = ny.plans[ym][kind].find(x => x.id === id);
+    if (o && num(el.value) !== null) o.amount = num(el.value);
+  });
+}
+
+function viewNewYear() {
+  if (!S.ny || S.ny.Y !== nyYear()) startNY();
+  const ny = S.ny;
+  const Y = ny.Y;
+  const X = Y - 1;
+  const h = H();
+  const sv = h.savings || {};
+  const actual = Number(sv.actual) || 0;
+  const monthOpts = (val, from = 1) => nyMonths(Y).slice(from - 1).map(ym => `<option value="${ym}" ${ym === val ? 'selected' : ''}>${D.name(ym)}</option>`).join('');
+  const steps = `<div class="steps">${NY_STEPS.map((s, i) => `<span class="${i === ny.step ? 'on' : i < ny.step ? 'done' : ''}" title="${s}"></span>`).join('')}</div>`;
+  let body = '';
+  if (ny.step === 0) {
+    const added = (sv.log || []).filter(l => new Date(l.t).getFullYear() === X && l.kind !== 'hysa').reduce((a, l) => a + (Number(l.amount) || 0), 0);
+    const floor = Number(sv.floor) || 5000;
+    const goalMin = Number(sv.goalMin) || 5000;
+    const goalMax = Number(sv.goalMax) || 10000;
+    const extra = round2(actual - floor);
+    body = `<h2>${X} savings recap</h2>
+      <div class="line"><span>Savings right now</span><b>${money(actual)}</b></div>
+      ${added ? `<div class="line"><span>Added in ${X}</span><b>${added > 0 ? '+' : ''}${money(added)}</b></div>` : ''}
+      <p class="small muted">${actual >= goalMax ? `Past your ${money(goalMax)} goal! 🎉` : actual >= goalMin ? `Past your ${money(goalMin)} minimum — ${money(goalMax - actual)} short of the ${money(goalMax)} goal.` : `${money(goalMin - actual)} short of your ${money(goalMin)} minimum.`}</p>
+      ${bucketsOn() ? `<h3>Buckets</h3>${(h.buckets || []).map(b => `<div class="line"><span>${esc(b.emoji || '')} ${esc(b.name)}</span><b>${money(Calc.bucketBalances(h)[b.id] || 0)}</b></div>`).join('')}`
+        : `<h3>Move to the HYSA</h3>
+        <p class="small muted">${extra > 0 ? `${money(extra)} is above the ${money(floor)} you keep in savings. Move it to the HYSA in your bank, then type what you actually moved.` : `Savings is at or under the ${money(floor)} you keep in savings — nothing to move. Type an amount if you moved some anyway.`}</p>
+        <label class="amount move-amt"><span>$</span><input id="ny-moved" inputmode="decimal" value="${esc(ny.moved)}" aria-label="Amount moved to HYSA"></label>
+        <p class="small muted">Savings will be set to what’s left when you finish.</p>`}`;
+  } else if (ny.step === 1) {
+    const total = h.categories.reduce((a, c) => a + (num(ny.budgets[c.id]) || 0), 0);
+    body = `<h2>Budgets for ${Y}</h2><p class="muted">Normal monthly amounts starting January. Change any that should be different this year.</p>
+      ${h.categories.map(c => `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">now ${money(c.budget)}</span></span><input class="mini" id="ny-b-${esc(c.id)}" inputmode="decimal" value="${esc(ny.budgets[c.id])}"></div>`).join('')}
+      <div class="line subtotal"><span>Total</span><b>${money(total)}</b></div>`;
+  } else if (ny.step === 2) {
+    const later = b => [...(b.changes || []).filter(c => c.from > `${Y}-01` && c.from <= `${Y}-12`).map(c => ({ ...c, saved: true })), ...ny.billChanges.filter(c => c.bill === b.id)]
+      .sort((a, c) => (a.from < c.from ? -1 : 1));
+    body = `<h2>Bills for ${Y}</h2><p class="muted">What each bill will be in January. Know one is changing later in the year? Add it below.</p>
+      ${(h.bills || []).map(b => `<div class="line"><span>${esc(b.name)} <span class="small muted">${D.ordinal(b.day)}</span></span><input class="mini" id="ny-bill-${esc(b.id)}" inputmode="decimal" value="${esc(ny.bills[b.id])}"></div>
+        ${later(b).map(c => `<div class="small muted change">→ ${money(c.amount)} starting ${D.name(c.from)}${c.saved ? '' : ` <button class="linkish small" data-act="ny-bc-del" data-id="${esc(c.id)}">remove</button>`}</div>`).join('')}`).join('')}
+      ${(h.bills || []).length ? `<h3>A change later in ${Y}</h3>
+      <div class="add-row ny-add"><select id="ny-bc-bill">${h.bills.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select><select id="ny-bc-m">${monthOpts(`${Y}-02`, 2)}</select><input id="ny-bc-a" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="ny-bc-add">Add</button></div>` : ''}`;
+  } else if (ny.step === 3) {
+    const people = Calc.earners(h);
+    const nameOf = id => (people.find(e => e.id === id) || {}).name || '?';
+    const later = [...(h.usualChanges || []).filter(c => c.from > `${Y}-01` && c.from <= `${Y}-12`).map(c => ({ ...c, saved: true })), ...ny.usualChanges].sort((a, b) => (a.from < b.from ? -1 : 1));
+    body = `<h2>Usual income in ${Y}</h2><p class="muted">Your usual monthly paychecks starting January. The Year tab uses these for any month you haven’t filled in.</p>
+      <div class="two">${people.map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input id="ny-u-${esc(e.id)}" inputmode="decimal" value="${esc(ny.usual[e.id])}" placeholder="$"></label>`).join('')}</div>
+      <h3>Expecting a change?</h3><p class="small muted">A raise or a new job starting a certain month.</p>
+      ${later.map(c => `<div class="small muted change">→ ${esc(nameOf(c.earner))} ${money(c.amount)} starting ${D.name(c.from)}${c.saved ? '' : ` <button class="linkish small" data-act="ny-uc-del" data-id="${esc(c.id)}">remove</button>`}</div>`).join('')}
+      <div class="add-row ny-add">${people.length > 1 ? `<select id="ny-uc-who">${people.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>` : ''}<select id="ny-uc-m">${monthOpts(`${Y}-02`, 2)}</select><input id="ny-uc-a" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="ny-uc-add">Add</button></div>`;
+  } else if (ny.step === 4) {
+    const sug = nySuggestions(ny);
+    const item = (ym, kind, o) => `<div class="line ny-item"><span><i class="sign">${kind === 'extra' ? '+' : '−'}</i>${esc(o.name)}</span><span class="row gap"><input class="mini" data-ny-item="${ym}|${kind}|${esc(o.id)}" inputmode="decimal" value="${esc(o.amount)}" aria-label="${esc(o.name)} amount"><button class="x small" data-act="ny-del" data-ym="${ym}" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button></span></div>`;
+    body = `<h2>One-time money in ${Y}</h2><p class="muted">Expenses (anniversary, Christmas, trips) and additional income (OT, academy pay) in the months you expect them. Each month’s setup picks these up.</p>
+      ${sug.length ? `<h3>From ${X}</h3><p class="small muted">Tap Add on anything that happens again.</p>
+        ${sug.map((g, i) => `<div class="line ny-sug"><span><b>${D.short(g.ym)}</b> ${esc(g.name)} <span class="small muted">${g.kind === 'extra' ? 'income' : 'expense'}</span></span><span class="row gap"><b>${money(g.amount)}</b><button class="btn small" data-act="ny-sug" data-i="${i}">Add</button></span></div>`).join('')}` : ''}
+      <h3>Add something</h3>
+      <div class="ny-pick"><select data-ch="ny-pick" data-f="addMonth">${monthOpts(ny.addMonth)}</select>
+        <div class="seg">${[['other', 'Expense'], ['extra', 'Income']].map(([k, l]) => `<button class="${ny.addKind === k ? 'on' : ''}" data-act="ny-kind" data-v="${k}">${l}</button>`).join('')}</div></div>
+      <div class="add-row"><input id="ny-o-name" placeholder="${ny.addKind === 'extra' ? 'e.g. Academy week' : 'e.g. Anniversary'}"><input id="ny-o-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="ny-add">Add</button></div>
+      <h3>Your ${Y}</h3>
+      ${nyMonths(Y).map(ym => { const p = ny.plans[ym]; const n = p.other.length + p.extra.length; return n ? `<div class="ny-month"><div class="label">${D.name(ym)}</div>${p.other.map(o => item(ym, 'other', o)).join('')}${p.extra.map(o => item(ym, 'extra', o)).join('')}</div>` : ''; }).join('') || '<p class="muted small">Nothing yet.</p>'}`;
+  } else {
+    const h2 = nyApplied(ny);
+    const yr = Calc.year(h2, S.months, Y, S.purchases, homeYm());
+    const end = yr.endOfYear;
+    const tot = k => nyMonths(Y).reduce((a, ym) => a + ny.plans[ym][k].reduce((s, o) => s + (Number(o.amount) || 0), 0), 0);
+    const budgets = h2.categories.reduce((a, c) => a + (Number(c.budget) || 0), 0);
+    const bills = (h2.bills || []).reduce((a, b) => a + Calc.billNormal(b, `${Y}-01`), 0);
+    const income = Calc.earners(h2).reduce((a, e) => a + (Number(Calc.usualFor(h2, e.id, `${Y}-01`)) || 0), 0);
+    body = `<h2>Your ${Y} at a glance</h2>
+      <div class="line"><span>Usual income <span class="small muted">a month</span></span><b>${money(income)}</b></div>
+      <div class="line"><span>Bills <span class="small muted">January</span></span><b>${money(bills)}</b></div>
+      <div class="line"><span>Budgets <span class="small muted">a month</span></span><b>${money(budgets)}</b></div>
+      <div class="line"><span>One-time expenses</span><b>${money(tot('other'))}</b></div>
+      <div class="line"><span>Additional income</span><b>${money(tot('extra'))}</b></div>
+      <div class="line total-line"><span>Projected savings Dec 31</span><b class="${end !== null && end >= ny.goals.goalMin ? 'save-good' : ''}">${end === null ? '—' : money(end)}</b></div>
+      <p class="small muted">${end === null ? 'Add usual income to see a projection.' : end >= ny.goals.goalMax ? 'Past your goal! 🎉' : end >= ny.goals.goalMin ? `Past the minimum — ${money(ny.goals.goalMax - end)} short of the goal.` : `${money(ny.goals.goalMin - end)} short of the minimum.`}</p>
+      <h3>Savings goals for ${Y}</h3>
+      <div class="two"><label class="field"><span class="label">Minimum</span><input id="ny-goalMin" inputmode="decimal" value="${esc(ny.goals.goalMin)}"></label>
+      <label class="field"><span class="label">Goal</span><input id="ny-goalMax" inputmode="decimal" value="${esc(ny.goals.goalMax)}"></label></div>
+      <button class="btn full" data-act="ny-finish">Finish & open ${Y}</button>`;
+  }
+  return `<header class="hero small-hero"><h1>Set up ${Y}</h1></header>
+    ${steps}<section class="card setup">${body}</section>
+    <div class="row between">${ny.step > 0 ? '<button class="btn ghost" data-act="ny-back">Back</button>' : '<a class="btn ghost" href="#/review" data-act="ny-cancel">Cancel</a>'}
+      ${ny.step < NY_STEPS.length - 1 ? `<button class="btn" data-act="ny-next">Next: ${NY_STEPS[ny.step + 1]}</button>` : ''}</div>`;
+}
+
+async function finishNY() {
+  readNYInputs();
+  const ny = S.ny;
+  const Y = ny.Y;
+  const h2 = nyApplied(ny);
+  const moved = bucketsOn() ? 0 : Math.max(0, num(ny.moved) || 0);
+  const pairs = [
+    [['categories'], h2.categories], [['bills'], h2.bills], [['usual'], h2.usual || {}], [['usualChanges'], h2.usualChanges],
+    [['savings', 'goalMin'], ny.goals.goalMin], [['savings', 'goalMax'], ny.goals.goalMax],
+    [['savings', 'hysaDone', String(Y - 1)], moved || 0.01], [['nyDone', String(Y)], Date.now()],
+  ];
+  for (const ym of nyMonths(Y)) pairs.push([['plans', ym], h2.plans[ym]]);
+  if (moved) pairs.push([['savings', 'hysa'], round2((Number(H().savings.hysa) || 0) + moved)]);
+  await B.setH(pairs);
+  if (moved) await setSavings(round2((Number(H().savings.actual) || 0) - moved), `Year-end move to HYSA (${Y - 1})`, 'hysa');
+  S.ny = null;
+  S.year = Y;
+  location.hash = '#/year';
+  confetti();
+  toast(`${Y} is set up 🎉`);
+}
+
 /* ---------- Settings ---------- */
 
 function viewSettings() {
@@ -1307,6 +1523,7 @@ function viewSettingsSetup() {
     <h3>Usual monthly income</h3>
     <div class="two">${Calc.earners(h).map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input data-ch="usual" data-f="${esc(e.id)}" inputmode="decimal" value="${esc((h.usual || {})[e.id])}" placeholder="$"></label>`).join('')}</div>
     <p class="small muted">Used on the Year tab for any month you haven’t filled in (shown as “usual”). Type a real amount on a month and it takes over.</p>
+    ${usualChangesHtml()}
   </section>
   <section class="card"><h2>Features</h2>
     ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
@@ -1767,15 +1984,9 @@ const acts = {
     inp.focus();
     inp.select();
   },
-  'p-oadd': () => {
-    const name = $('#p-oname').value.trim();
-    const amount = num($('#p-oamt').value);
-    if (!name || !amount) { toast('Add a name and an amount'); return; }
-    S.plan.other.push({ id: newId(), name, amount });
-    $('#p-other').innerHTML = planOtherHtml();
-    $('#p-oname').value = ''; $('#p-oamt').value = '';
-  },
-  'p-odel': el => { S.plan.other = S.plan.other.filter(o => o.id !== el.dataset.id); $('#p-other').innerHTML = planOtherHtml(); },
+  'p-oadd': () => planAdd('other', '#p-oname', '#p-oamt'),
+  'p-xadd': () => planAdd('extra', '#p-xname', '#p-xamt'),
+  'p-del': el => { const k = el.dataset.kind; S.plan[k] = S.plan[k].filter(o => o.id !== el.dataset.id); $(`#p-${k}`).innerHTML = planListHtml(k); },
   'p-save': () => savePlan(),
   savings: () => {
     S.sheet = 'savings';
@@ -1794,20 +2005,6 @@ const acts = {
     toast('Savings updated');
   },
 
-  hysa: async el => {
-    const v = Math.max(0, num($('#mv-hysa').value) || 0);
-    const Y = el.dataset.y;
-    const sv = H().savings;
-    const floor = Number(sv.floor) || 5000;
-    const left = round2((Number(sv.actual) || 0) - v);
-    const q = v > 0 ? `Moved ${money(v)} to the HYSA? Savings will be set to ${money(left)}.` : `Close out ${Y} and look at ${Number(Y) + 1}?`;
-    if (!(await ask(q, v > 0 ? 'Yes, reset' : 'Yes'))) return;
-    await B.setH([[['savings', 'hysa'], round2((Number(sv.hysa) || 0) + v)], [['savings', 'hysaDone', Y], v || 0.01]]);
-    if (v > 0) await setSavings(left, `Year-end move to HYSA (${Y})`, 'hysa');
-    S.year = Number(Y) + 1;
-    location.hash = '#/year';
-    if (v > 0) { confetti(); toast(`${money(v)} to the HYSA 🎉 Here’s ${Number(Y) + 1}.`); }
-  },
 
   'bd-m': el => { S.bdYm = D.addMonths(S.bdYm || homeYm(), Number(el.dataset.d)); render(); ensureLoaded(S.bdYm).catch(e => console.warn('older purchases', e)); },
   'bd-tab': el => { S.bdTab = el.dataset.v; render(); },
@@ -1841,6 +2038,47 @@ const acts = {
   },
   'd-in-add': () => { readDraftInputs(); S.draft.incoming.push({ id: newId(), name: `Paycheck ${S.draft.incoming.length + 1}`, amount: 0, received: false }); render(); },
   'd-finish': el => finishSetup(el.dataset.mode),
+  'ny-next': () => { readNYInputs(); S.ny.step++; window.scrollTo(0, 0); render(); },
+  'ny-back': () => { readNYInputs(); S.ny.step--; window.scrollTo(0, 0); render(); },
+  'ny-cancel': () => { S.ny = null; },
+  'ny-finish': () => finishNY(),
+  'ny-kind': el => { readNYInputs(); S.ny.addKind = el.dataset.v; render(true); },
+  'ny-add': () => {
+    readNYInputs();
+    const name = $('#ny-o-name').value.trim();
+    const amount = num($('#ny-o-amt').value);
+    if (!name || !amount) { toast('Add a name and an amount'); return; }
+    S.ny.plans[S.ny.addMonth][S.ny.addKind].push({ id: newId(), name, amount });
+    $('#ny-o-name').value = ''; $('#ny-o-amt').value = '';
+    render(true);
+  },
+  'ny-sug': el => {
+    readNYInputs();
+    const g = nySuggestions(S.ny)[Number(el.dataset.i)];
+    if (g) S.ny.plans[g.ym][g.kind].push({ id: newId(), name: g.name, amount: g.amount });
+    render(true);
+  },
+  'ny-del': el => { readNYInputs(); const { ym, kind, id } = el.dataset; S.ny.plans[ym][kind] = S.ny.plans[ym][kind].filter(o => o.id !== id); render(true); },
+  'ny-bc-add': () => {
+    readNYInputs();
+    const amount = num($('#ny-bc-a').value);
+    if (amount === null) { toast('Type the new amount'); return; }
+    const bill = $('#ny-bc-bill').value; const from = $('#ny-bc-m').value;
+    S.ny.billChanges = [...S.ny.billChanges.filter(c => !(c.bill === bill && c.from === from)), { id: newId(), bill, from, amount }];
+    $('#ny-bc-a').value = '';
+    render(true);
+  },
+  'ny-bc-del': el => { readNYInputs(); S.ny.billChanges = S.ny.billChanges.filter(c => c.id !== el.dataset.id); render(true); },
+  'ny-uc-add': () => {
+    readNYInputs();
+    const amount = num($('#ny-uc-a').value);
+    if (amount === null) { toast('Type the new amount'); return; }
+    const earner = $('#ny-uc-who') ? $('#ny-uc-who').value : Calc.earners(H())[0].id; const from = $('#ny-uc-m').value;
+    S.ny.usualChanges = [...S.ny.usualChanges.filter(c => !(c.earner === earner && c.from === from)), { id: newId(), earner, from, amount }];
+    $('#ny-uc-a').value = '';
+    render(true);
+  },
+  'ny-uc-del': el => { readNYInputs(); S.ny.usualChanges = S.ny.usualChanges.filter(c => c.id !== el.dataset.id); render(true); },
   'd-showmove': () => { readDraftInputs(); S.draft.showMove = true; render(); },
 
   'cat-add': async () => {
@@ -1895,6 +2133,15 @@ const acts = {
     const bills = H().bills.map(b => (b.id === id ? { ...b, changes: [...(b.changes || []).filter(c => c.from !== from), { from, amount }].sort((a, c) => (a.from < c.from ? -1 : 1)) } : b));
     await B.setH([[['bills'], bills]]);
   },
+  'uc-add': async () => {
+    const who = $('#uc-who') ? $('#uc-who').value : Calc.earners(H())[0].id;
+    const from = $('#uc-m').value;
+    const amount = num($('#uc-a').value);
+    if (!from || amount === null) { toast('Pick a month and an amount'); return; }
+    const list = [...(H().usualChanges || []).filter(c => !(c.earner === who && c.from === from)), { id: newId(), earner: who, from, amount }];
+    await B.setH([[['usualChanges'], list]]);
+  },
+  'uc-del': async el => { await B.setH([[['usualChanges'], (H().usualChanges || []).filter(c => c.id !== el.dataset.id)]]); },
   'chg-del': async el => {
     const bills = H().bills.map(b => (b.id === el.dataset.id ? { ...b, changes: b.changes.filter((_, i) => i !== Number(el.dataset.i)) } : b));
     await B.setH([[['bills'], bills]]);
@@ -2046,6 +2293,7 @@ const changes = {
     await B.setH([[['earners'], Calc.earners(H()).map(e => (e.id === el.dataset.id ? { ...e, name } : e))]]);
   },
   usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
+  'ny-pick': el => { S.ny[el.dataset.f] = el.value; },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
   font: async el => { await B.setH([[['look', el.dataset.f], el.value]]); },
   calm: async el => { await B.setH([[['look', 'calm'], el.checked]]); },

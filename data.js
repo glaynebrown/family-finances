@@ -101,7 +101,7 @@ function seedHousehold(uid, name) {
 
 // A setup file (JSON) can fill in a new household: same fields as above, plus
 // optional months. Only known fields are taken.
-const SETUP_FIELDS = ['earners', 'categories', 'stores', 'tags', 'bills', 'helpers', 'savings', 'plans', 'usual',
+const SETUP_FIELDS = ['earners', 'categories', 'stores', 'tags', 'bills', 'helpers', 'savings', 'plans', 'usual', 'usualChanges',
   'trackMode', 'rules', 'features', 'buckets', 'bucketTx', 'look'];
 function applySetup(seed, file) {
   const out = { household: { ...seed.household }, months: { ...seed.months } };
@@ -116,6 +116,21 @@ const Calc = (() => {
   const earners = H => (H.earners && H.earners.length ? H.earners : [{ id: 'nick', name: 'Nick' }, { id: 'bella', name: 'Bella' }]);
 
   // The bill's normal amount for a month (with scheduled changes)...
+  // Additional income in a month's plan: a list (older plans had one 'elevate' amount + name).
+  const extras = p => {
+    p = p || {};
+    if (Array.isArray(p.extra)) return p.extra;
+    return Number(p.elevate) > 0 ? [{ id: 'elevate', name: p.elevateName || 'Additional income', amount: Number(p.elevate) }] : [];
+  };
+  const extraTotal = p => round2(extras(p).reduce((s, x) => s + (Number(x.amount) || 0), 0));
+  // Usual monthly income for one person in a month: the latest scheduled change
+  // (raise, new job) on or before that month, else the Settings amount.
+  const usualFor = (H, id, ym) => {
+    let v = (H.usual || {})[id];
+    let from = '';
+    for (const c of H.usualChanges || []) if (c.earner === id && c.from <= ym && c.from >= from) { v = c.amount; from = c.from; }
+    return v;
+  };
   const billNormal = (bill, ym) => {
     let amt = Number(bill.amount) || 0;
     const ch = (bill.changes || []).filter(c => c.from <= ym).sort((a, b) => (a.from < b.from ? -1 : 1));
@@ -275,12 +290,12 @@ const Calc = (() => {
     const actual = Number((H.savings || {}).actual) || 0;
     // Paychecks for a month: what's typed in, or the usual amounts from
     // Settings for months from now on that haven't been filled in.
-    const usual = H.usual || {};
     const blank = v => v === undefined || v === null || v === '';
     const pay = (ym, k) => {
       const p = plans[ym] || {};
       if (!blank(p[k])) return { v: Number(p[k]) || 0, est: false };
-      if (ym >= homeYm && !blank(usual[k])) return { v: Number(usual[k]) || 0, est: true };
+      const u = usualFor(H, k, ym);
+      if (ym >= homeYm && !blank(u)) return { v: Number(u) || 0, est: true };
       return null;
     };
     const people = earners(H);
@@ -319,8 +334,8 @@ const Calc = (() => {
         } else if (p.savings !== undefined && p.savings !== null && p.savings !== '') { sv = Number(p.savings); kind = 'set'; }
         // ElevateEMS pay is additional income in its own month. Once that month
         // is set up it's on the checklist (so it's already in the live number).
-        else if (prevIn === null) { sv = Number(p.elevate) || 0; kind = 'noincome'; }
-        else { sv = round2(prevIn - expenses - other + (Number(p.elevate) || 0)); kind = 'auto'; }
+        else if (prevIn === null) { sv = extraTotal(p); kind = 'noincome'; }
+        else { sv = round2(prevIn - expenses - other + extraTotal(p)); kind = 'auto'; }
         if (ym === homeYm) running = actual + (kind === 'moved' ? 0 : sv);
         else running = running + sv;
         bal[ym] = round2(running);
@@ -338,7 +353,7 @@ const Calc = (() => {
       rows.push({
         ym, plan: p, past, current: ym === homeYm,
         pay: people.map(e => { const g = pay(ym, e.id); return { id: e.id, name: e.name, v: g ? g.v : undefined, est: !!(g && g.est) }; }),
-        elevate: Number(p.elevate) || 0, elevateToSavings: p.elevateToSavings !== false,
+        elevate: extraTotal(p), extras: extras(p),
         total: inc, prevIn,
         expenses: s ? s.expenses : (p.expenses !== undefined && p.expenses !== '' && p.expenses !== null ? Number(p.expenses) : null),
         other: p.other || [],
@@ -382,5 +397,5 @@ const Calc = (() => {
     return { add, extra: round2(left), bal };
   }
 
-  return { earners, bucketBalances, splitIntoBuckets, billAmount, billNormal, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
+  return { earners, extras, extraTotal, usualFor, bucketBalances, splitIntoBuckets, billAmount, billNormal, billCharge, billStatus, allocations, spent, budgetFor, checklist, homeMonth, year, heldFor };
 })();
