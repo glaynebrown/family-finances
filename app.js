@@ -790,6 +790,39 @@ function newYearCard() {
   return `<a class="card setup-link ny-link" href="#/newyear"><span class="grow"><b>Set up ${Y}</b><span class="small muted">${bucketsOn() ? 'Savings recap' : 'Savings recap & HYSA'}, then budgets, bills, income and one-time money for the year</span></span><i>›</i></a>`;
 }
 
+// Every purchase ever (search and backups need more than the recent months kept live).
+async function loadAllPurchases() {
+  const FROM = '2000-01-01';
+  while (S.loading) await new Promise(r => setTimeout(r, 200));
+  if (S.loadedFrom <= FROM) return;
+  S.loading = true;
+  try {
+    const got = await B.loadPurchases(FROM, S.loadedFrom);
+    S.loadedFrom = FROM;
+    S.older = S.older.concat(got);
+    mergePurchases();
+  } finally { S.loading = false; }
+}
+
+// Search: every word has to show up somewhere — store, note, tags, category, date or amount.
+function searchResultsHtml(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  const hay = p => {
+    const c = catById(p.cat);
+    return [p.store, p.note, ...(p.tags || []), c ? c.name : 'uncategorized', p.date, D.niceDay(p.date), D.name(D.ymOf(p.date)),
+      (Number(p.amount) || 0).toFixed(2), money(p.amount)].join(' ').toLowerCase();
+  };
+  const hits = S.purchases.filter(p => { const h = hay(p); return words.every(w => h.includes(w.replace(/^\$/, ''))); })
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const total = round2(hits.reduce((a, p) => a + (Number(p.amount) || 0), 0));
+  return `<section class="card"><div class="row between"><span class="label">${hits.length} purchase${hits.length === 1 ? '' : 's'}</span><b>${money(total)}</b></div>
+    ${hits.length ? hits.slice(0, 100).map(p => purchaseRow(p, false)).join('') : '<p class="muted small">Nothing matches.</p>'}
+    ${hits.length > 100 ? '<p class="small muted">Showing the newest 100 — add another word to narrow it down.</p>' : ''}
+    ${S.loadedFrom > '2000-01-01' ? '<p class="small muted">Loading older purchases…</p>' : ''}</section>`;
+}
+function refreshSearch() { const box = $('#pq-results'); if (box) box.innerHTML = S.pq ? searchResultsHtml(S.pq) : ''; }
+
 function viewReview() {
   const ym = S.bdYm || homeYm();
   setTimeout(() => ensureLoaded(ym).catch(e => console.warn('older purchases', e)), 0);
@@ -816,6 +849,8 @@ function viewReview() {
   ${newYearCard()}
   <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
   <h2 class="section-title">Breakdown</h2>
+  <div class="psearch"><input id="pq" type="search" placeholder="🔍 Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
+  <div id="pq-results">${S.pq ? searchResultsHtml(S.pq) : ''}</div>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
   <section class="card">
     <div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>
@@ -1750,6 +1785,41 @@ async function finishNY() {
   toast(`${Y} is set up 🎉`);
 }
 
+/* ---------- Backup / export ---------- */
+
+// Hand a file to the person: the iPhone share sheet (Save to Files, AirDrop, email) when
+// it's available, otherwise a normal download.
+async function saveFile(name, text, type) {
+  const file = new File([text], name, { type });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const csvCell = v => { const t = String(v === undefined || v === null ? '' : v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+
+async function exportCSV() {
+  await loadAllPurchases();
+  const rows = [['Date', 'Store', 'Category', 'Amount', 'Tags', 'Note', 'Spread (months)', 'Logged by', 'Source', 'Bank confirmed']];
+  for (const p of [...S.purchases].sort((a, b) => (a.date < b.date ? -1 : 1))) {
+    const c = catById(p.cat);
+    rows.push([p.date, p.store || '', c ? c.name : 'Uncategorized', (Number(p.amount) || 0).toFixed(2), (p.tags || []).join('; '), p.note || '',
+      p.spread || 1, p.byName || '', p.src === 'import' ? 'Imported' : 'Logged', p.bankConfirmed ? 'Yes' : '']);
+  }
+  await saveFile(`family-finances-purchases-${D.today()}.csv`, rows.map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv');
+}
+
+async function exportJSON() {
+  await loadAllPurchases();
+  const data = { app: 'Family Finances', exportedAt: new Date().toISOString(), household: H(), months: S.months, purchases: S.purchases.map(({ part, ...p }) => p) };
+  await saveFile(`family-finances-backup-${D.today()}.json`, JSON.stringify(data, null, 1), 'application/json');
+}
+
 /* ---------- Settings ---------- */
 
 function viewSettings() {
@@ -1829,6 +1899,7 @@ function fold(key, title, summary, body) {
 function viewSettingsSetup() {
   const h = H();
   const sv = h.savings || {};
+  setTimeout(() => loadAllPurchases().catch(e => console.warn('backup preload', e)), 0);
   return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Setup</h1></header>
 
   <section class="card"><h2>You</h2>
@@ -1869,6 +1940,12 @@ function viewSettingsSetup() {
     <p class="small muted">When you set up a month, only the Savings/Excess above this is suggested for moving to savings.</p>
     ${(sv.log || []).length ? `<details class="small"><summary>Savings history</summary>${[...sv.log].reverse().slice(0, 40).map(l => `<div class="line small"><span>${new Date(l.t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(l.note || l.kind)}</span><span>${l.kind === 'set' && l.note === 'Starting balance' ? money(l.amount) : (l.amount >= 0 ? '+' : '') + money(l.amount)}</span></div>`).join('')}</details>` : ''}
   </section>
+  <section class="card"><h2>Backup</h2>
+    <p class="small muted">Download a copy of your data to keep in Files, iCloud or email.</p>
+    <div class="stack"><button class="btn ghost full" data-act="export-csv">Download purchases (spreadsheet)</button>
+    <button class="btn ghost full" data-act="export-json">Download everything (full backup)</button></div>
+  </section>
+
   <section class="card"><h2>Household</h2>
     ${Store.configured ? `<p>Share this code with anyone joining this household (Create account → Join with a code):</p><div class="code">${esc(h.joinCode)}</div><button class="btn ghost small" data-act="copy-code">Copy code</button>` : '<p class="small muted">Sample mode — the join code appears here once Firebase is connected.</p>'}
     <p class="small muted">In the household: ${Object.values(h.people || {}).map(p => esc(p.name)).join(', ')}</p>
@@ -2057,6 +2134,8 @@ const acts = {
     toast('Deleted');
   },
 
+  'export-csv': () => exportCSV().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
+  'export-json': () => exportJSON().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
   'to-uncat': () => { const c = $('.uncat-card'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
   eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
@@ -2679,6 +2758,11 @@ document.addEventListener('input', e => {
     const sum = $('#alloc-sum'); if (sum) sum.innerHTML = allocSumHtml();
     const btn = $('#alloc-save');
     if (btn) { btn.textContent = allocSaveLabel(); btn.disabled = S.alloc.amount < 0 && Math.abs(allocLeft()) > 0.004; }
+  }
+  if (e.target.id === 'pq') {
+    S.pq = e.target.value.trim();
+    refreshSearch();
+    if (S.pq && S.loadedFrom > '2000-01-01') loadAllPurchases().then(refreshSearch).catch(err => console.warn('search', err));
   }
   // Splitting a logged purchase: same live "what's left" as imports (also when the total changes).
   if ((e.target.matches('[data-ch="l-split-amt"]') || e.target.id === 'l-amount') && S.log && S.log.splits) {

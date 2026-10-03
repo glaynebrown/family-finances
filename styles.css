@@ -468,3 +468,7 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .dp-grid button.on { background: var(--accent); color: var(--on-accent); font-weight: 800; }
 .dp-grid button:disabled { opacity: .25; cursor: default; }
 .spend-sum .uncat-jump { font-weight: 800; font-size: inherit; font-family: inherit; color: var(--ink); }
+
+/* Purchase search (Review) */
+.psearch { margin: 0 0 12px; }
+.psearch input { border-radius: 99px; padding: 11px 16px; }
