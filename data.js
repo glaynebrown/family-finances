@@ -67,7 +67,7 @@ const Looks = {
 };
 
 // A brand-new household starts blank (a few starter categories, no bills, no
-// numbers). Anything personal comes from a setup file the person loads, so no
+// numbers). Everything personal is filled in by the first-time walkthrough, so no
 // one's finances live in this public code.
 function seedHousehold(uid, name) {
   const household = {
@@ -75,6 +75,7 @@ function seedHousehold(uid, name) {
     people: { [uid]: { name } },
     joinCode: '',
     created: Date.now(),
+    welcomeBy: uid, // whoever starts the household gets the first-time walkthrough
     earners: [{ id: 'p1', name }],
     categories: [
       { id: 'food', name: 'Food', budget: 0, emoji: '🛒' },
@@ -97,17 +98,6 @@ function seedHousehold(uid, name) {
     look: { heading: 'Oswald', body: 'Nunito', colors: { ...Looks.colors }, glass: 0.82, calm: true },
   };
   return { household, months: {} };
-}
-
-// A setup file (JSON) can fill in a new household: same fields as above, plus
-// optional months. Only known fields are taken.
-const SETUP_FIELDS = ['earners', 'categories', 'stores', 'tags', 'bills', 'helpers', 'savings', 'plans', 'usual', 'usualChanges',
-  'trackMode', 'rules', 'features', 'buckets', 'bucketTx', 'look'];
-function applySetup(seed, file) {
-  const out = { household: { ...seed.household }, months: { ...seed.months } };
-  for (const k of SETUP_FIELDS) if (file[k] !== undefined) out.household[k] = file[k];
-  if (file.months && typeof file.months === 'object') Object.assign(out.months, file.months);
-  return out;
 }
 
 const Calc = (() => {

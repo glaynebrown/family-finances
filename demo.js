@@ -70,14 +70,6 @@ const Demo = (() => {
     loadPurchases() { return Promise.resolve([]); }, // sample mode keeps everything live
     deletePurchase(id) { st.purchases = st.purchases.filter(x => x.id !== id); emit(); return Promise.resolve(); },
     setWallpaper(m, data) { if (data) st.wallpapers[m] = data; else delete st.wallpapers[m]; emit(); return Promise.resolve(); },
-    loadSetup(file) {
-      const fresh = seedHousehold('me', 'Bella');
-      const { household, months } = applySetup(fresh, file);
-      household.joinCode = 'SAMPLE22';
-      st = { H: household, months, purchases: [], wallpapers: {} };
-      emit();
-      return Promise.resolve();
-    },
     reset() { localStorage.removeItem(KEY); location.reload(); },
     uid: () => 'me',
   };

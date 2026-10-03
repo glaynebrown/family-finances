@@ -49,10 +49,9 @@ const Store = (() => {
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const makeCode = () => Array.from({ length: 8 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-  async function createHousehold(name, setupFile) {
+  async function createHousehold(name) {
     const u = auth.currentUser;
-    let { household, months } = seedHousehold(u.uid, name);
-    if (setupFile) ({ household, months } = applySetup({ household, months }, setupFile));
+    const { household, months } = seedHousehold(u.uid, name);
     const ref = db.collection('households').doc();
     household.joinCode = makeCode();
     await ref.set(household);
