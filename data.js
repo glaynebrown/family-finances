@@ -261,12 +261,16 @@ const Calc = (() => {
       budgetsLeft += Math.max(0, budget - used);
       return { ...c, budget, used, left: round2(budget - used), over: used > budget + 0.004 };
     });
-    // Purchases in a category that no longer exists still count as spending.
+    // Purchases not sorted into a category yet (or in a deleted one) still come out of
+    // what's left to spend, so the number doesn't jump when they get a category.
+    const ids = new Set((H.categories || []).map(c => c.id));
+    const uncat = round2(Object.keys(s.cat).filter(k => !ids.has(k)).reduce((a, k) => a + s.cat[k], 0));
+    budgetsLeft = Math.max(0, budgetsLeft - uncat);
     const excess = round2(est + backIn + owed - heldBack - nextPay - billsLeft - otherLeft - budgetsLeft);
     return {
       checking: round2(snap.amount), checkedAt: at, est: round2(est), since,
       backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), nextPay: round2(nextPay), billsLeft: round2(billsLeft),
-      otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s,
+      otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s, uncat,
     };
   }
 

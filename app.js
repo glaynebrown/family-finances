@@ -326,7 +326,7 @@ function viewHome() {
   const M = S.months[ym];
   const c = Calc.checklist(H(), M, ym, S.purchases);
   const totalB = c.cats.reduce((s, x) => s + x.budget, 0);
-  const totalU = c.cats.reduce((s, x) => s + x.used, 0);
+  const totalU = c.cats.reduce((s, x) => s + x.used, 0) + c.uncat;
   const pct = totalB ? Math.min(100, (totalU / totalB) * 100) : 0;
   const overs = c.cats.filter(x => x.over);
   return `
@@ -339,6 +339,7 @@ function viewHome() {
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
+    ${c.uncat > 0.004 ? `<div class="small muted">Includes ${money(c.uncat)} not sorted yet</div>` : ''}
     ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `${H().trackMode === 'both' ? 'Last import through' : 'Updated through'} ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
