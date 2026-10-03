@@ -382,7 +382,9 @@ function logHtml() {
   const chip = (act, v, on, label) => `<button type="button" class="chip ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${label}</button>`;
   return `<div class="sheet-head"><h2>${L.id ? 'Edit purchase' : 'Log a purchase'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <label class="amount"><span>$</span><input id="l-amount" inputmode="decimal" placeholder="0.00" value="${esc(L.amount)}" autocomplete="off"></label>
-  <div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, `${esc(c.emoji || '')} ${esc(c.name)}`)).join('')}</div></div>
+  ${L.id && L.splitGroup ? `<p class="small muted">Part of a ${money(L.splitTotal)} receipt split across categories.</p>` : ''}
+  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, `${esc(c.emoji || '')} ${esc(c.name)}`)).join('')}</div>
+    ${L.id ? '' : '<button type="button" class="linkish small" data-act="l-split">Split between categories</button>'}</div>`}
   <div class="field"><span class="label">Store</span><div class="chips">${(H().stores || []).map(s => chip('l-store', s, L.store === s, esc(s))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
   <div class="field"><span class="label">Tags <span class="muted small">(optional — for tracking things like diapers)</span></span><div class="chips">${(H().tags || []).map(t => chip('l-tag', t, L.tags.includes(t), esc(t))).join('')}
@@ -392,6 +394,19 @@ function logHtml() {
   <div class="field"><span class="label">Bulk buy? Spread it over</span><div class="seg">${[1, 2, 3, 4, 6].map(n => `<button type="button" class="${Number(L.spread) === n ? 'on' : ''}" data-act="l-spread" data-v="${n}">${n === 1 ? 'Just this month' : n + ' months'}</button>`).join('')}</div></div>
   <div class="row end sheet-foot">${L.id ? '<button class="btn ghost danger" data-act="l-del">Delete</button>' : ''}<button class="btn" data-act="l-save">${L.id ? 'Save' : 'Log it'}</button></div>`;
 }
+// One receipt, several categories (Target: diapers for Twins, clothes for Home, groceries).
+// Saved as one purchase per category, tied together so an import matches the whole receipt.
+function logSplitHtml(L) {
+  const total = num(L.amount) || 0;
+  return `<div class="field"><span class="label">Split between categories</span>
+    ${L.splits.map((sp, j) => `<div class="edit-row"><input class="mini" data-ch="l-split-amt" data-j="${j}" inputmode="decimal" value="${sp.amount}" aria-label="Amount">
+      <select data-ch="l-split-cat" data-j="${j}" aria-label="Category">${catOptions(sp.cat)}</select>
+      <select class="split-tag" data-ch="l-split-tag" data-j="${j}" aria-label="Tag"><option value="">Tag</option>${(H().tags || []).map(t => `<option ${sp.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>
+      ${j > 1 ? `<button type="button" class="x small" data-act="l-split-del" data-j="${j}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+    <div class="small">${splitSumHtml({ i: 'log', amount: total, splits: L.splits })} · <button type="button" class="linkish small" data-act="l-split-add">+ another</button> · <button type="button" class="linkish small" data-act="l-split-off">undo split</button></div></div>`;
+}
+const logSplitRow = L => ({ amount: num(L.amount) || 0, splits: L.splits });
+
 function redrawLog() { syncLog(); const y = $('#sheet').scrollTop; $('#sheet').innerHTML = logHtml(); $('#sheet').scrollTop = y; }
 
 async function saveLog() {
@@ -399,6 +414,7 @@ async function saveLog() {
   const L = S.log;
   const amount = num(L.amount);
   if (!amount || amount <= 0) { toast('Add the amount first'); $('#l-amount').focus(); return; }
+  if (!L.id && L.splits) { await saveLogSplit(amount); return; }
   if (!L.cat) { toast('Pick a category'); return; }
   const rec = {
     amount, cat: L.cat, store: L.store || '', tags: L.tags || [], note: (L.note || '').trim(),
@@ -409,6 +425,7 @@ async function saveLog() {
   if (L.id) rec.id = L.id;
   if (L.src) { rec.src = L.src; rec.key = L.key || ''; }
   if (L.bankConfirmed) rec.bankConfirmed = true;
+  if (L.splitGroup) { rec.splitGroup = L.splitGroup; rec.splitTotal = L.splitTotal; }
   const before = Calc.checklist(H(), S.months[D.ymOf(rec.date)], D.ymOf(rec.date), S.purchases).cats.find(c => c.id === rec.cat);
   closeSheet();
   await B.savePurchase(rec);
@@ -418,6 +435,24 @@ async function saveLog() {
   const after = Calc.checklist(H(), S.months[ym], ym, S.purchases.filter(p => p.id !== rec.id).concat([{ ...rec, id: rec.id || 'new' }])).cats.find(x => x.id === rec.cat);
   if (after && after.over && !(before && before.over)) toast(calm() ? `${c.name} is ${money(after.used - after.budget)} over — flagged for review. That’s OK.` : `${c.name} is over budget by ${money(after.used - after.budget)}`);
   else if (after) toast(`Logged ${money(amount)} · ${money(Math.max(0, after.left))} left in ${c.name}`);
+}
+
+async function saveLogSplit(amount) {
+  const L = S.log;
+  const parts = L.splits.filter(sp => Number(sp.amount));
+  const sum = round2(parts.reduce((a, sp) => a + Number(sp.amount), 0));
+  if (Math.abs(sum - amount) > 0.004) { toast(`The split adds up to ${money(sum)} of ${money(amount)}`); return; }
+  if (parts.some(sp => !sp.cat)) { toast('Pick a category for each part'); return; }
+  const group = newId();
+  const base = {
+    store: L.store || '', note: (L.note || '').trim(), date: L.date || D.today(), spread: Number(L.spread) || 1,
+    by: me(), byName: myName(), t: Date.now(), splitGroup: group, splitTotal: amount,
+  };
+  base.until = untilOf(base);
+  const list = parts.map(sp => ({ ...base, amount: Number(sp.amount), cat: sp.cat, tags: [...new Set([...(L.tags || []), ...(sp.tag ? [sp.tag] : [])])] }));
+  closeSheet();
+  await B.savePurchases(list);
+  toast(`Logged ${money(amount)} across ${list.length} categories`);
 }
 
 /* ---------- Bills ---------- */
@@ -993,7 +1028,14 @@ function matchLogged(rows) {
     return String(store || '').toLowerCase().split(/[^a-z]+/).some(w => w.length >= 4 && bank.includes(w));
   };
   const day = d => new Date(`${d}T12:00`).getTime() / 864e5;
-  const logs = S.purchases.filter(x => x.src !== 'import' && !x.bankConfirmed);
+  const logs = [];
+  const groups = {};
+  for (const x of S.purchases.filter(x => x.src !== 'import' && !x.bankConfirmed)) {
+    if (!x.splitGroup) { logs.push(x); continue; }
+    const g = groups[x.splitGroup] = groups[x.splitGroup] || { id: `g:${x.splitGroup}`, group: x.splitGroup, amount: 0, store: x.store, date: x.date, cat: x.cat };
+    g.amount = round2(g.amount + (Number(x.amount) || 0));
+  }
+  logs.push(...Object.values(groups)); // a split receipt matches the bank charge as a whole
   const used = new Set();
   const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && r.amount);
   const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
@@ -1007,7 +1049,7 @@ function matchLogged(rows) {
   }
   for (const r of cands) {
     if (r.status !== 'review') continue;
-    const x = best(r, x => Math.sign(Number(x.amount) || 0) === Math.sign(r.amount) && sameStore(x.store, r.name)
+    const x = best(r, x => !x.group && Math.sign(Number(x.amount) || 0) === Math.sign(r.amount) && sameStore(x.store, r.name)
       && Math.abs((Number(x.amount) || 0) - r.amount) <= Math.max(5, Math.abs(r.amount) * 0.3));
     if (!x) continue;
     used.add(x.id);
@@ -1132,8 +1174,9 @@ async function saveImport() {
     if (r.post && r.post > latest) latest = r.post;
     // Already logged by hand: mark it bank-confirmed (and fix the amount if it changed).
     if (r.status === 'logged' || (r.close && r.closeSame)) {
-      const p = S.purchases.find(x => x.id === (r.matchId || r.close.id));
-      if (p) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
+      const id = r.matchId || r.close.id;
+      const hits = String(id).startsWith('g:') ? S.purchases.filter(x => `g:${x.splitGroup}` === id) : S.purchases.filter(x => x.id === id);
+      for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
       continue;
     }
     if (r.payCandidate) {
@@ -2000,6 +2043,10 @@ const acts = {
     redrawLog();
   },
   'l-save': () => saveLog(),
+  'l-split': () => { syncLog(); const L = S.log; L.splits = [{ amount: num(L.amount) || 0, cat: L.cat || '' }, { amount: 0, cat: '' }]; splitFill(logSplitRow(L)); redrawLog(); },
+  'l-split-add': () => { syncLog(); const L = S.log; L.splits.forEach(sp => { sp.touched = true; }); L.splits.push({ amount: 0, cat: '' }); splitFill(logSplitRow(L)); redrawLog(); },
+  'l-split-del': el => { syncLog(); const L = S.log; L.splits.splice(Number(el.dataset.j), 1); splitFill(logSplitRow(L)); redrawLog(); },
+  'l-split-off': () => { syncLog(); const L = S.log; L.cat = (L.splits.find(sp => sp.cat) || {}).cat || L.cat; L.splits = null; redrawLog(); },
   'l-del': async () => {
     if (!(await ask('Delete this purchase?', 'Delete'))) return;
     const id = S.log.id;
@@ -2563,6 +2610,13 @@ const changes = {
   },
   'imp-bal': el => { S.imp.bal = el.value; },
   'imp-remember': el => { S.imp.rows[el.dataset.i].remember = el.checked; },
+  'l-split-amt': el => { const L = S.log; Object.assign(L.splits[el.dataset.j], { amount: num(el.value) || 0, touched: true }); splitFill(logSplitRow(L)); redrawLog(); },
+  'l-split-cat': el => { S.log.splits[el.dataset.j].cat = el.value; },
+  'l-split-tag': async el => {
+    const sp = S.log.splits[el.dataset.j];
+    if (el.value === '__new') { const v = await newTag(); if (v) sp.tag = v; redrawLog(); return; }
+    sp.tag = el.value;
+  },
   'imp-split-amt': el => { const r = S.imp.rows[el.dataset.i]; Object.assign(r.splits[el.dataset.j], { amount: num(el.value) || 0, touched: true }); splitFill(r); render(true); },
   'imp-split-tag': async el => {
     const sp = S.imp.rows[el.dataset.i].splits[el.dataset.j];
@@ -2623,6 +2677,15 @@ document.addEventListener('input', e => {
     const sum = $('#alloc-sum'); if (sum) sum.innerHTML = allocSumHtml();
     const btn = $('#alloc-save');
     if (btn) { btn.textContent = allocSaveLabel(); btn.disabled = S.alloc.amount < 0 && Math.abs(allocLeft()) > 0.004; }
+  }
+  // Splitting a logged purchase: same live "what's left" as imports (also when the total changes).
+  if ((e.target.matches('[data-ch="l-split-amt"]') || e.target.id === 'l-amount') && S.log && S.log.splits) {
+    const L = S.log;
+    if (e.target.id === 'l-amount') L.amount = e.target.value;
+    else Object.assign(L.splits[e.target.dataset.j], { amount: num(e.target.value) || 0, touched: true });
+    const j = splitFill(logSplitRow(L));
+    if (j !== null) { const box = $(`#sheet [data-ch="l-split-amt"][data-j="${j}"]`); if (box && box !== e.target) box.value = L.splits[j].amount; }
+    const sum = $('#split-sum-log'); if (sum) sum.outerHTML = splitSumHtml({ i: 'log', ...logSplitRow(L) });
   }
   // Splitting an import: show what's left (and fill the next split) while typing.
   if (e.target.matches('[data-ch="imp-split-amt"]') && S.imp) {
