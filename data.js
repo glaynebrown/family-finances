@@ -72,7 +72,7 @@ const Looks = {
 function seedHousehold(uid, name) {
   const household = {
     members: { [uid]: true },
-    people: { [uid]: { name } },
+    people: { [uid]: { name, tourPending: true } }, // tourPending: show the app tour once
     joinCode: '',
     created: Date.now(),
     welcomeBy: uid, // whoever starts the household gets the first-time walkthrough

@@ -71,7 +71,7 @@ const Store = (() => {
     const id = snap.get('hid');
     await db.collection('households').doc(id).update(
       new firebase.firestore.FieldPath('members', u.uid), true,
-      new firebase.firestore.FieldPath('people', u.uid), { name },
+      new firebase.firestore.FieldPath('people', u.uid), { name, tourPending: true },
       'joinAttempt', code,
     );
     await db.collection('users').doc(u.uid).set({ hid: id });

@@ -237,13 +237,18 @@ function render(force) {
   window.scrollTo(0, y);
   drawTabs(r);
   if (r === 'welcome') $('#tabs').hidden = true;
+  // New person (after first-time setup, or joined with a code): show the tour once.
+  if (r !== 'welcome' && !S.tour && !S.tourAsked && ((H().people || {})[me()] || {}).tourPending) { S.tourAsked = true; setTimeout(startTour, 700); }
+  if (S.tour) setTimeout(tourDraw, 50);
   const fab = $('#fab');
   fab.hidden = !['home', 'review'].includes(r);
-  const importing = H().trackMode === 'import';
+  // The tour's Log/Import stop shows both buttons, whatever this household picked.
+  const tourBoth = S.tour && S.tour.steps[S.tour.i].showBoth;
+  const importing = H().trackMode === 'import' && !tourBoth;
   // Both: + Log stays the main button, with a small Import button beside it.
   let fab2 = $('#fab2');
   if (!fab2) { fab2 = document.createElement('button'); fab2.id = 'fab2'; fab2.className = 'fab fab-mini'; fab2.dataset.act = 'import-file'; fab2.setAttribute('aria-label', 'Import bank transactions'); fab2.innerHTML = '<span>↑</span> Import'; document.body.appendChild(fab2); }
-  fab2.hidden = fab.hidden || H().trackMode !== 'both';
+  fab2.hidden = fab.hidden || (H().trackMode !== 'both' && !tourBoth);
   fab.dataset.act = importing ? 'import-file' : 'log';
   fab.innerHTML = importing ? '<span>↑</span> Import' : '<span>+</span> Log';
   fab.setAttribute('aria-label', importing ? 'Import bank transactions' : 'Log a purchase');
@@ -488,7 +493,7 @@ function billsSections() {
     ${excessNote}
   </section>
 
-  <section class="card">
+  <section class="card bills-card">
     <div class="row between card-head"><h2>Automatic payments</h2>${eyeBtn()}</div>
     <p class="small muted">These check themselves off on their due date. Tap to change one if something’s off.</p>
     ${c.bills.filter(b => !(S.hideDone && b.paid)).map(b => {
@@ -1575,6 +1580,80 @@ async function finishWelcome(skipped) {
   if (!skipped) { confetti(); toast('You’re all set 🎉'); }
 }
 
+/* ---------- App tour ("How does it work?") ----------
+   Dims the screen, spotlights one thing at a time with a short note, and moves
+   between pages by itself. Shows once for each new person (after first-time
+   setup, or the first time someone who joined with a code opens the app), and
+   anytime from Settings. */
+
+function tourSteps() {
+  const ov = overviewOn();
+  const st = [];
+  if (ov) st.push(
+    { route: 'home', page: 'overview', sel: '.checking-row', title: 'Checking', text: 'Tap here to type your real balance from your bank app. After that, the app takes out bills on their due dates and purchases you log or import here. Spent something you didn’t put in the app? Update the balance so it stays right.' },
+    { route: 'home', page: 'overview', sel: '.checklist .total-line', title: 'Savings/Excess', text: 'What’s truly extra this month — after bills still to come, other expenses and what’s left in your budgets. If it’s negative, that’s how much you’d need to cut back (or move from savings) to break even.' },
+    { route: 'home', page: 'overview', sel: '.bills-card', title: 'Automatic payments', text: 'Bills check themselves off on their due date. Tap one if something’s off.' },
+  );
+  st.push(
+    { route: 'home', page: 'budgets', sel: '.spend-sum', title: 'Budgets', text: 'How much is left to spend this month, with a card for each category below. Tap a card to log or see its purchases.' },
+    { route: 'home', page: 'budgets', sel: ['#fab', '#fab2'], showBoth: true, title: 'Tracking spending: Log or Import', text: '+ Log: add a purchase right after you buy it (you can split one receipt across categories). Import: download your bank’s transactions as a CSV file weekly (or as often as you like) and the app sorts them for you. Or do both — anything you already logged is matched, never counted twice. Choose in Settings → Setup.' },
+    { route: 'review', sel: '.setup-link', title: 'Set up next month', text: 'Do this at the end of the month, when you’re ready to move on to the next one. It walks through your checking balance, bills, budgets, paychecks and what moves to savings. Anything you planned on the Year tab (income, OT, one-time expenses) fills in automatically — you can still change it.' },
+    { route: 'review', sel: '.psearch', title: 'Breakdown & search', text: 'See where the money went by category, store or tag — and search any purchase ever.' },
+    { route: 'year', sel: '.months', title: 'Year', text: 'Your savings projected month by month. Tap a month to plan raises, overtime, Christmas or anything one-time.' },
+    { route: 'home', sel: '.home-hero .gear', title: 'Settings', text: 'Categories, bills, income and everything else live here. Want this tour again? Settings → How does it work?' },
+  );
+  return st;
+}
+
+function startTour() {
+  S.tour = { i: 0, steps: tourSteps() };
+  tourGo();
+}
+
+function tourGo() {
+  const T = S.tour;
+  const st = T.steps[T.i];
+  if (st.page) { S.page = st.page; try { localStorage.setItem('ne-page', S.page); } catch (e) {} }
+  if (route() !== st.route) location.hash = `#/${st.route}`; else render(true);
+  setTimeout(() => {
+    const el = $([].concat(st.sel)[0]);
+    if (el) el.scrollIntoView({ block: 'center' });
+    setTimeout(tourDraw, 250);
+  }, 250);
+}
+
+function tourDraw() {
+  const T = S.tour;
+  if (!T) return;
+  const st = T.steps[T.i];
+  let box = $('#tour');
+  if (!box) { box = document.createElement('div'); box.id = 'tour'; document.body.appendChild(box); }
+  // One spotlight around everything this stop points at (e.g. both + Log and Import).
+  const rects = [].concat(st.sel).map(x => $(x)).filter(x => x && !x.hidden).map(x => x.getBoundingClientRect());
+  const r = rects.length ? { top: Math.min(...rects.map(q => q.top)), left: Math.min(...rects.map(q => q.left)), bottom: Math.max(...rects.map(q => q.bottom)), right: Math.max(...rects.map(q => q.right)) } : null;
+  if (r) { r.width = r.right - r.left; r.height = r.bottom - r.top; }
+  const pad = 8;
+  const last = T.i === T.steps.length - 1;
+  const spot = r ? `<div class="tour-spot" style="top:${r.top - pad}px;left:${r.left - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px"></div>` : '<div class="tour-dim"></div>';
+  // Bubble goes below the spotlight if there's room, otherwise above.
+  const below = !r || r.bottom + 230 < window.innerHeight;
+  const pos = !r ? 'top:30%' : below ? `top:${Math.round(r.bottom + pad + 12)}px` : `bottom:${Math.round(window.innerHeight - r.top + pad + 12)}px`;
+  box.innerHTML = `${spot}<div class="tour-bubble" style="${pos}" role="dialog" aria-label="${esc(st.title)}">
+    <div class="row between"><b>${esc(st.title)}</b><button class="x small" data-act="tour-end" aria-label="Close tour">×</button></div>
+    <p>${esc(st.text)}</p>
+    <div class="row between"><span class="steps tour-dots">${T.steps.map((_, i) => `<span class="${i === T.i ? 'on' : i < T.i ? 'done' : ''}"></span>`).join('')}</span>
+      <span class="row gap">${T.i ? '<button class="btn ghost small" data-act="tour-back">Back</button>' : ''}<button class="btn small" data-act="${last ? 'tour-end' : 'tour-next'}">${last ? 'Done' : 'Next'}</button></span></div>
+  </div>`;
+}
+
+async function endTour() {
+  S.tour = null;
+  const box = $('#tour'); if (box) box.remove();
+  if (((H().people || {})[me()] || {}).tourPending) await B.setH([[['people', me(), 'tourPending'], B.DEL]]);
+}
+window.addEventListener('resize', () => { if (S.tour) tourDraw(); });
+window.addEventListener('scroll', () => { if (S.tour) tourDraw(); }, { passive: true });
+
 /* ---------- Set up next year (December / January, from Review) ---------- */
 
 const NY_STEPS = ['Savings recap', 'Budgets', 'Bills', 'Income', 'One-time money', 'Your year'];
@@ -1844,6 +1923,7 @@ function viewSettings() {
 
   ${monthlyTotalCard()}
 
+  <button class="card menu-row" data-act="tour-start"><span><b>How does it work?</b><span class="small muted">A quick tour of each page</span></span><span class="chev">›</span></button>
   <a class="card menu-row" href="#/settings/setup"><span><b>Setup</b><span class="small muted">Your name, people & income, features, how you track spending, savings goals, household</span></span><span class="chev">›</span></a>`;
 }
 
@@ -2134,6 +2214,10 @@ const acts = {
     toast('Deleted');
   },
 
+  'tour-start': () => startTour(),
+  'tour-next': () => { S.tour.i++; tourGo(); },
+  'tour-back': () => { S.tour.i--; tourGo(); },
+  'tour-end': async () => { await endTour(); location.hash = '#/home'; render(true); },
   'export-csv': () => exportCSV().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
   'export-json': () => exportJSON().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
   'to-uncat': () => { const c = $('.uncat-card'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
