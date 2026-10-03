@@ -383,7 +383,7 @@ function logHtml() {
   return `<div class="sheet-head"><h2>${L.id ? 'Edit purchase' : 'Log a purchase'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <label class="amount"><span>$</span><input id="l-amount" inputmode="decimal" placeholder="0.00" value="${esc(L.amount)}" autocomplete="off"></label>
   ${L.id && L.splitGroup ? `<p class="small muted">Part of a ${money(L.splitTotal)} receipt split across categories.</p>` : ''}
-  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, `${esc(c.emoji || '')} ${esc(c.name)}`)).join('')}</div>
+  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, `${esc(c.emoji || '')} ${esc(c.name)}`)).join('')}${chip('l-cat', 'uncat', L.cat === 'uncat' || (L.id && !catById(L.cat)), '❔ Decide later')}</div>
     ${L.id ? '' : '<button type="button" class="linkish small" data-act="l-split">Split between categories</button>'}</div>`}
   <div class="field"><span class="label">Store</span><div class="chips">${(H().stores || []).map(s => chip('l-store', s, L.store === s, esc(s))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
@@ -431,6 +431,7 @@ async function saveLog() {
   await B.savePurchase(rec);
   if (rec.id && rec.date < S.since) { S.older = S.older.map(p => (p.id === rec.id ? { ...rec } : p)); mergePurchases(); render(); }
   const c = catById(rec.cat);
+  if (!c) { toast(`Logged ${money(amount)} · in Uncategorized until you pick a category`); return; }
   const ym = D.ymOf(rec.date);
   const after = Calc.checklist(H(), S.months[ym], ym, S.purchases.filter(p => p.id !== rec.id).concat([{ ...rec, id: rec.id || 'new' }])).cats.find(x => x.id === rec.cat);
   if (after && after.over && !(before && before.over)) toast(calm() ? `${c.name} is ${money(after.used - after.budget)} over — flagged for review. That’s OK.` : `${c.name} is over budget by ${money(after.used - after.budget)}`);
