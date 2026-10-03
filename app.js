@@ -339,7 +339,7 @@ function viewHome() {
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
-    ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
+    ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `${H().trackMode === 'both' ? 'Last import through' : 'Updated through'} ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
   ${uncatCard(c.spent)}`}`;
@@ -439,7 +439,7 @@ function billsSections() {
     ${checking}
     ${c.since.length ? `<button class="linkish small" data-act="since">${S.sinceOpen ? 'Hide' : 'What changed since then?'}</button>
       ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}${s.kind ? ` <button class="linkish small" data-act="since-pre" data-kind="${s.kind}" data-id="${esc(s.id)}">already in that balance</button>` : ''}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}
-        <p class="small muted">Something here was already in the balance you typed? Tap “already in that balance” so it isn’t counted twice.</p></div>` : ''}` : ''}
+        <p class="small muted">Something here was already in the balance you typed? Tap “already in that balance” so it isn’t counted twice. (Anything you check off within an hour of typing a balance is counted as already in it.)</p></div>` : ''}` : ''}
     ${c.backIn ? line('+', 'Additional income', c.backIn) : ''}
     ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
@@ -507,11 +507,18 @@ function listCard(kind, title, items, flag, flagLabel) {
 
 // Check/uncheck an item. Re-checking something that was already in before the
 // last checking balance keeps its old time, so it isn't counted twice.
+// Checking something off within an hour of typing the checking balance (same
+// sitting): it's taken as already in that balance, so it isn't added or
+// subtracted a second time. Later than that, it's treated as new.
+function stampNow() {
+  const snap = ((S.months[homeYm()] || {}).checking || {}).at || 0;
+  return snap && Date.now() - snap < 36e5 ? snap : Date.now();
+}
 function toggleFlag(o, flag) {
   const key = flag + 'At';
   if (o[flag]) return { ...o, [flag]: false };
   const snap = ((S.months[homeYm()] || {}).checking || {}).at || 0;
-  return { ...o, [flag]: true, [key]: o[key] && o[key] <= snap ? o[key] : Date.now() };
+  return { ...o, [flag]: true, [key]: o[key] && o[key] <= snap ? o[key] : stampNow() };
 }
 
 // Keep the Year tab's income for this month in step with the paychecks listed
@@ -1092,17 +1099,17 @@ function viewImport() {
     <p class="small muted">${review.length} to review${logged.length ? ` · ${logged.length} already logged` : ''} · ${skipped.length} skipped (bills & transfers)${dups ? ` · ${dups} already imported` : ''}</p>
     ${I.gap ? `<p class="msg small">${esc(I.gap)}</p>` : ''}
   </section>
+  <section class="card">
+    <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
+      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" placeholder="from your Navy Federal app" value="${esc(I.bal || '')}"></span></label>
+    <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
+  </section>
   ${logged.length ? `<button class="linkish small add-link" data-act="imp-logged">${I.showLogged ? 'Hide' : 'Show'} ${logged.length} already logged ✓</button>${I.showLogged ? logged.map(impRow).join('') : ''}` : ''}
   ${first.length ? `<h2 class="section-title">Needs a look <span class="small muted">${open} left</span></h2>${first.map(impRow).join('')}` : ''}
   ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits are skipped).</p>` : ''}
-  <section class="card">
-    <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
-      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" placeholder="from your Navy Federal app" value="${esc(I.bal || '')}"></span></label>
-    <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
-  </section>
   <div class="import-save">
     <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}</button>
   </div>`;
@@ -1139,7 +1146,7 @@ async function saveImport() {
     }
     const base = {
       store: r.name, note: '', date: r.date, spread: 1, by: 'import', byName: 'Bank', src: 'import',
-      key: r.key, t: new Date(`${r.post || r.date}T12:00`).getTime(), until: D.ymOf(r.date),
+      key: r.key, t: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), until: D.ymOf(r.date),
     };
     if (r.splits) {
       r.splits.forEach((sp, j) => { const a = Number(sp.amount) || 0; if (a) purchases.push({ ...base, key: `${r.key}:${j}`, amount: a, cat: sp.cat || 'uncat', tags: [...new Set([...r.tags, ...(sp.tag ? [sp.tag] : [])])] }); });
@@ -1155,16 +1162,22 @@ async function saveImport() {
   for (const p of confirm) await B.savePurchase(p);
   // Bills that came through at a different amount: use the real charge for that month.
   const billHits = {};
+  const billPosted = {};
   for (const r of I.rows) {
     if (r.status === 'dup' || !r.billId) continue;
     const k = `${D.ymOf(r.date)}|${r.billId}`;
     billHits[k] = round2((billHits[k] || 0) + (Number(r.charged) || 0));
+    billPosted[k] = Math.max(billPosted[k] || 0, Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()));
   }
+  // The bank shows it charged: it's paid (as of when it posted), even if its due date hasn't come yet.
+  for (const k in billPosted) { const [ym, id] = k.split('|'); await B.setMonthField(ym, ['bills', id], { posted: true, at: billPosted[k] }); }
   for (const k in billHits) {
     const [ym, id] = k.split('|');
     const b = (H().bills || []).find(x => x.id === id);
     if (!b) continue;
-    if (Math.abs(billHits[k] - Calc.billNormal(b, ym)) > 0.004) await B.setMonthField(ym, ['billAmt', id], billHits[k]);
+    // Shared bills: the charge includes everyone's share; this month's amount is just ours.
+    const ours = round2(billHits[k] - Calc.heldFor(S.months[ym], id).reduce((t, h) => t + (Number(h.amount) || 0), 0));
+    if (Math.abs(ours - Calc.billNormal(b, ym)) > 0.004) await B.setMonthField(ym, ['billAmt', id], ours);
   }
   // Each paycheck checks off the next one expected that month, with its real
   // amount (overtime and all); if they've all arrived, it's added to the list.
@@ -1173,7 +1186,7 @@ async function saveImport() {
   for (const ym in byMonth) {
     const list = [...((S.months[ym] || {}).incoming || [])].map(x => ({ ...x }));
     for (const r of byMonth[ym]) {
-      const at = new Date(`${r.post || r.date}T12:00`).getTime();
+      const at = Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime());
       const slot = list.find(x => !x.received);
       if (slot) Object.assign(slot, { amount: r.amount, received: true, receivedAt: at, fromImport: true });
       else list.push({ id: newId(), name: `Paycheck ${list.length + 1}`, amount: r.amount, received: true, receivedAt: at, fromImport: true });
@@ -1373,6 +1386,7 @@ async function finishSetup(mode) {
     const v = readMove('setup');
     if (!v) { toast('Type the amount you moved'); return; }
     M.moved = v;
+    M.movedAt = M.checking.at + 1;
     if (bucketsOn() && (H().buckets || []).length && !S.allocTx) {
       openAllocate(v, tx => { S.allocTx = tx; finishSetup(mode); });
       return;
@@ -2048,14 +2062,14 @@ const acts = {
     const paid = !st.paid;
     // Paid-by-hand bills: checked = paid today; unchecked = back to waiting.
     if (b.autopay === false) {
-      await B.setMonthField(ym, ['bills', b.id], paid ? { paid: true, at: Date.now(), manual: true } : B.DEL);
+      await B.setMonthField(ym, ['bills', b.id], paid ? { paid: true, at: stampNow(), manual: true } : B.DEL);
       return;
     }
     // Autopay: if the tap lands where the due date would have it anyway, go back
     // to automatic (no "set by hand" note). Otherwise remember it was set by
     // hand, paid on its due date if that's passed (so checking isn't charged twice).
     const auto = Date.now() >= st.due;
-    await B.setMonthField(ym, ['bills', b.id], paid === auto ? B.DEL : { paid, at: Math.min(Date.now(), st.due), manual: true });
+    await B.setMonthField(ym, ['bills', b.id], paid === auto ? B.DEL : { paid, at: Math.min(stampNow(), st.due), manual: true });
   },
   // It was already out of (or in) checking when the balance was typed: stop counting it again.
   'since-pre': async el => {

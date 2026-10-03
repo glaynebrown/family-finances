@@ -147,6 +147,8 @@ const Calc = (() => {
     const self = bill.autopay === false;
     // Already out of checking when the balance was typed (so it isn't subtracted again).
     if (o && o.pre) return { paid: true, at: 0, manual: false, pre: true, self, due, late: false };
+    // Seen in a bank import: paid when it actually posted.
+    if (o && o.posted) return { paid: true, at: o.at || 0, manual: false, posted: true, self, due, late: false };
     if (o && o.manual) return { paid: !!o.paid, at: o.at || due, manual: !self, self, due, late: !o.paid && now >= due };
     if (self) return { paid: false, at: due, manual: false, self, due, late: now >= due };
     return { paid: now >= due, at: due, manual: false, due, late: false };
@@ -248,7 +250,8 @@ const Calc = (() => {
     let purchased = 0;
     for (const p of purchases) if ((p.t || 0) > at) purchased += Number(p.amount) || 0;
     if (purchased) { est -= purchased; since.push({ what: 'Purchases logged', amount: -purchased }); }
-    if (M.moved) { est -= M.moved; since.push({ what: M.moved > 0 ? 'Moved to savings' : 'Taken from savings', amount: -M.moved }); }
+    // The setup transfer only comes off a balance typed before it happened.
+    if (M.moved && (M.movedAt || M.setupAt || 0) > at) { est -= M.moved; since.push({ what: M.moved > 0 ? 'Moved to savings' : 'Taken from savings', amount: -M.moved }); }
 
     const s = spent(purchases, ym);
     let budgetsLeft = 0;

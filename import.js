@@ -100,7 +100,9 @@ const Imp = (() => {
       const bw = words(b.name).filter(w => !['payment', 'family', '-'].includes(w));
       if (!bw.length || !bw.every(w => dw.has(w))) continue;
       if (paymentTo) return b;
-      const amts = [Number(b.amount) || 0, ...(b.changes || []).map(c => Number(c.amount) || 0)];
+      // Shared bills (AT&T) charge our part plus everyone else's.
+      const shares = (H.helpers || []).filter(h => h.bill === b.id).reduce((t, h) => t + (Number(h.amount) || 0), 0);
+      const amts = [Number(b.amount) || 0, ...(b.changes || []).map(c => Number(c.amount) || 0)].flatMap(a => [a, a + shares]);
       if (amts.some(a => Math.abs(a - rec.amount) <= Math.max(0.5, a * 0.02))) return b;
     }
     return null;
@@ -143,16 +145,18 @@ const Imp = (() => {
       }
       if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
       if (venmo) { row.reason = rec.credit ? 'Venmo in — your call' : 'Venmo — your call'; row.amount = rec.credit ? -rec.amount : rec.amount; return row; }
-      if (!isBuy && !isRefund) { row.status = 'skip'; row.cat = 'skip'; row.reason = rec.credit ? 'Money in (transfer/deposit)' : 'Transfer or payment'; return row; }
-      const rule = findRule(rules, mkey);
-      if (rule && rule.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = rule.note ? `Skipped — ${rule.note}` : 'Skipped by your rule'; return row; }
-      const bill = isBuy && billFor(H, rec);
-      if (bill && !(rule && rule.action === 'cat')) {
-        const amt = Calc.billAmount(bill, D.ymOf(rec.date));
-        row.status = 'skip'; row.cat = 'skip'; row.billId = bill.id; row.charged = rec.amount;
-        row.reason = `Matches your ${bill.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)} (bill said ${money(amt)}); this month’s amount will be updated` : ''}`;
+      // Bill payments (card or ACH) are skipped but remembered, so the bill shows as paid.
+      const rule0 = findRule(rules, mkey);
+      const bill0 = !rec.credit && !(rule0 && rule0.action === 'cat') && billFor(H, rec);
+      if (bill0) {
+        const amt = Calc.billCharge(months[D.ymOf(rec.date)], bill0, D.ymOf(rec.date));
+        row.status = 'skip'; row.cat = 'skip'; row.billId = bill0.id; row.charged = rec.amount;
+        row.reason = `Matches your ${bill0.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)} (expected ${money(amt)}); this month’s amount will be updated` : ''}`;
         return row;
       }
+      if (!isBuy && !isRefund) { row.status = 'skip'; row.cat = 'skip'; row.reason = rec.credit ? 'Money in (transfer/deposit)' : 'Transfer or payment'; return row; }
+      const rule = rule0;
+      if (rule && rule.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = rule.note ? `Skipped — ${rule.note}` : 'Skipped by your rule'; return row; }
       if (rule && rule.action === 'ask') { row.ask = true; row.tags = [...(rule.tags || [])]; row.reason = 'You pick the category each time'; return row; }
       if (rule && rule.action === 'cat') { row.cat = rule.cat; row.tags = [...(rule.tags || [])]; row.reason = 'From your rule'; return row; }
       const guess = BANK[(rec.bankCat || '').toLowerCase()];
