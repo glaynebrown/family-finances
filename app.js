@@ -165,8 +165,8 @@ function render(force) {
   S.pending = false;
   if (!H()) return;
   applyLook();
-  const r = route();
-  const screens = { home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, newyear: viewNewYear, settings: viewSettings, import: viewImport, savings: viewSavings };
+  const r = welcoming() ? 'welcome' : route();
+  const screens = { welcome: viewWelcome, home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, newyear: viewNewYear, settings: viewSettings, import: viewImport, savings: viewSavings };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
   // Keep anything typed in "add" boxes (and which one had focus) across a redraw.
@@ -178,9 +178,14 @@ function render(force) {
   if (focusId && typed[focusId]) { const i = document.getElementById(focusId); if (i) i.focus(); }
   window.scrollTo(0, y);
   drawTabs(r);
+  if (r === 'welcome') $('#tabs').hidden = true;
   const fab = $('#fab');
   fab.hidden = !['home', 'review'].includes(r);
   const importing = H().trackMode === 'import';
+  // Both: + Log stays the main button, with a small Import button beside it.
+  let fab2 = $('#fab2');
+  if (!fab2) { fab2 = document.createElement('button'); fab2.id = 'fab2'; fab2.className = 'fab fab-mini'; fab2.dataset.act = 'import-file'; fab2.setAttribute('aria-label', 'Import bank transactions'); fab2.innerHTML = '<span>↑</span> Import'; document.body.appendChild(fab2); }
+  fab2.hidden = fab.hidden || H().trackMode !== 'both';
   fab.dataset.act = importing ? 'import-file' : 'log';
   fab.innerHTML = importing ? '<span>↑</span> Import' : '<span>+</span> Log';
   fab.setAttribute('aria-label', importing ? 'Import bank transactions' : 'Log a purchase');
@@ -254,7 +259,7 @@ function purchaseRow(p, showPart = true) {
     <span class="pmain"><span class="pstore">${esc(p.store || (c ? c.name : 'Purchase'))}</span>
       <span class="small muted">${D.niceDay(p.date)} · ${esc(c ? c.name : 'Uncategorized')}${p.spread > 1 ? ` · spread over ${p.spread} months` : ''}</span>
       ${tags ? `<span class="tags">${tags}</span>` : ''}${p.note ? `<span class="small muted">${esc(p.note)}</span>` : ''}</span>
-    <span class="pamt">${money(p.amount)}${part}</span>
+    <span class="pamt">${money(p.amount)}${part}${p.bankConfirmed ? '<span class="small muted bank-ok" title="Matched to the bank">✓ bank</span>' : ''}</span>
   </button>`;
 }
 
@@ -276,7 +281,7 @@ function viewHome() {
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
-    ${H().trackMode === 'import' ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
+    ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `Updated through ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
   ${uncatCard(c.spent)}`}`;
@@ -346,6 +351,7 @@ async function saveLog() {
   rec.until = untilOf(rec);
   if (L.id) rec.id = L.id;
   if (L.src) { rec.src = L.src; rec.key = L.key || ''; }
+  if (L.bankConfirmed) rec.bankConfirmed = true;
   const before = Calc.checklist(H(), S.months[D.ymOf(rec.date)], D.ymOf(rec.date), S.purchases).cats.find(c => c.id === rec.cat);
   closeSheet();
   await B.savePurchase(rec);
@@ -721,7 +727,7 @@ function viewReview() {
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
   </section>
   <section class="card"><h2>Every purchase</h2>${s.list.length ? s.list.map(p => purchaseRow(p)).join('') : '<p class="muted small">None yet.</p>'}</section>
-  ${Store.configured ? '' : '<div class="card"><p class="small muted">Sample mode keeps everything in this browser. Once Firebase is connected, you and Nick share the same data.</p><button class="btn ghost small" data-act="demo-reset">Reset sample data</button> <button class="btn ghost small" data-act="setup-file">Load setup file</button></div>'}`;
+  ${Store.configured ? '' : '<div class="card"><p class="small muted">Sample mode keeps everything in this browser. Once Firebase is connected, everyone in the household shares the same data.</p><button class="btn ghost small" data-act="demo-reset">Reset sample data</button></div>'}`;
 }
 
 // One item (a category, store or tag) over the last 12 months: a simple bar chart
@@ -902,11 +908,47 @@ function pickImportFile() {
         gap = `Your last import went through ${D.niceDay(last)}, but this file starts ${D.niceDay(res.from)}. A few days might be missing — download a longer date range to be safe.`;
       }
       for (const r of res.rows) r.firstNeeds = r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')));
+      if (H().trackMode === 'both') matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       location.hash = '#/import';
     } catch (e) { console.error(e); toast(e.message || 'Couldn’t read that file'); }
   };
   f.click();
+}
+
+// "Both" mode: bank rows that are purchases already logged by hand. Same amount within
+// a few days = already logged (it just gets marked bank-confirmed). Same store but a
+// different amount (a tip, a pending charge that changed) = asks to update the log.
+// Each logged purchase matches at most one bank row.
+function matchLogged(rows) {
+  const letters = x => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
+  const sameStore = (store, bankName) => {
+    const bank = letters(bankName);
+    const whole = letters(store);
+    if (whole.length >= 4 && bank.includes(whole)) return true;
+    return String(store || '').toLowerCase().split(/[^a-z]+/).some(w => w.length >= 4 && bank.includes(w));
+  };
+  const day = d => new Date(`${d}T12:00`).getTime() / 864e5;
+  const logs = S.purchases.filter(x => x.src !== 'import' && !x.bankConfirmed);
+  const used = new Set();
+  const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && r.amount);
+  const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
+  const best = (r, ok) => logs.filter(x => !used.has(x.id) && near(r, x) && ok(x))
+    .sort((a, b) => Math.abs(day(r.date) - day(a.date)) - Math.abs(day(r.date) - day(b.date)))[0];
+  for (const r of cands) {
+    const x = best(r, x => Math.abs((Number(x.amount) || 0) - r.amount) < 0.005);
+    if (!x) continue;
+    used.add(x.id);
+    Object.assign(r, { status: 'logged', matchId: x.id, reason: `Already logged: ${x.store || (catById(x.cat) || {}).name || 'purchase'} ${money(x.amount)} on ${D.niceDay(x.date)}` });
+  }
+  for (const r of cands) {
+    if (r.status !== 'review') continue;
+    const x = best(r, x => Math.sign(Number(x.amount) || 0) === Math.sign(r.amount) && sameStore(x.store, r.name)
+      && Math.abs((Number(x.amount) || 0) - r.amount) <= Math.max(5, Math.abs(r.amount) * 0.3));
+    if (!x) continue;
+    used.add(x.id);
+    Object.assign(r, { close: { id: x.id, amount: Number(x.amount), store: x.store || r.name, date: x.date }, closeSame: true, firstNeeds: true });
+  }
 }
 
 const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
@@ -915,6 +957,15 @@ const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
 
 function impRow(r) {
+  if (r.status === 'logged') {
+    return `<div class="imp-row logged"><div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
+      <div class="small muted">✓ ${esc(r.reason)} · <button class="linkish small" data-act="imp-unmatch" data-i="${r.i}">it’s different — add it</button></div></div>`;
+  }
+  if (r.close && r.closeSame) {
+    return `<div class="imp-row needs"><div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
+      <div class="small muted">Same as your logged ${esc(r.close.store)} ${money(r.close.amount)} on ${D.niceDay(r.close.date)}?</div>
+      <div class="imp-ctl"><button class="btn small" disabled>✓ Update it to ${money(r.amount)}</button><button class="btn ghost small" data-act="imp-close" data-i="${r.i}">No, it’s different</button></div></div>`;
+  }
   if (r.payCandidate) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
@@ -943,8 +994,9 @@ function viewImport() {
   if (!I) return `<header class="hero small-hero"><a class="back" href="#/home">‹ Home</a><h1>Import</h1></header>
     <section class="card"><p>Download your joint checking transactions from Navy Federal as a <b>CSV</b> (any date range — overlaps are fine), then pick the file.</p>
     <button class="btn full" data-act="import-file">Choose file</button></section>`;
-  const live = I.rows.filter(r => r.status !== 'dup');
-  const dups = I.rows.length - live.length;
+  const logged = I.rows.filter(r => r.status === 'logged');
+  const live = I.rows.filter(r => r.status !== 'dup' && r.status !== 'logged');
+  const dups = I.rows.length - live.length - logged.length;
   const review = live.filter(r => r.status === 'review');
   const skipped = live.filter(r => r.status === 'skip');
   const first = review.filter(r => r.firstNeeds);
@@ -953,9 +1005,10 @@ function viewImport() {
   return `<header class="hero small-hero"><a class="back" href="#/home" data-act="imp-cancel">‹ Cancel</a><h1>Import</h1></header>
   <section class="card">
     <div class="line"><span><b>${D.niceDay(I.from)} – ${D.niceDay(I.through)}</b></span><span class="small muted">${esc(I.name)}</span></div>
-    <p class="small muted">${review.length} to review · ${skipped.length} skipped (bills & transfers)${dups ? ` · ${dups} already imported` : ''}</p>
+    <p class="small muted">${review.length} to review${logged.length ? ` · ${logged.length} already logged` : ''} · ${skipped.length} skipped (bills & transfers)${dups ? ` · ${dups} already imported` : ''}</p>
     ${I.gap ? `<p class="msg small">${esc(I.gap)}</p>` : ''}
   </section>
+  ${logged.length ? `<button class="linkish small add-link" data-act="imp-logged">${I.showLogged ? 'Hide' : 'Show'} ${logged.length} already logged ✓</button>${I.showLogged ? logged.map(impRow).join('') : ''}` : ''}
   ${first.length ? `<h2 class="section-title">Needs a look <span class="small muted">${open} left</span></h2>${first.map(impRow).join('')}` : ''}
   ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
@@ -967,7 +1020,7 @@ function viewImport() {
     <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
   </section>
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}</button>
   </div>`;
 }
 
@@ -979,11 +1032,18 @@ async function saveImport() {
   const rules = { ...(H().rules || {}) };
   const pays = [];
   let latest = (H().imports || {}).through || '';
+  const confirm = [];
   for (const r of I.rows) {
     if (r.status === 'dup') continue;
     const ym = D.ymOf(r.date);
     (keysByMonth[ym] = keysByMonth[ym] || []).push(r.key);
     if (r.post && r.post > latest) latest = r.post;
+    // Already logged by hand: mark it bank-confirmed (and fix the amount if it changed).
+    if (r.status === 'logged' || (r.close && r.closeSame)) {
+      const p = S.purchases.find(x => x.id === (r.matchId || r.close.id));
+      if (p) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
+      continue;
+    }
     if (r.payCandidate) {
       if (r.remember && r.cat) rules[r.ruleKey] = { action: r.cat === 'pay' ? 'pay' : 'skip', name: r.name };
       if (r.cat === 'pay') pays.push(r);
@@ -1005,6 +1065,7 @@ async function saveImport() {
     if (r.remember && !r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits) rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
   }
   if (purchases.length) await B.savePurchases(purchases);
+  for (const p of confirm) await B.savePurchase(p);
   // Bills that came through at a different amount: use the real charge for that month.
   const billHits = {};
   for (const r of I.rows) {
@@ -1063,6 +1124,7 @@ function startDraft() {
     d.back = (MN.back || []).map(o => ({ ...o }));
     d.held = (MN.held || []).map(o => ({ ...o }));
     d.budgets = { ...(MN.budgets || {}) };
+    d.pre = Object.fromEntries(Object.entries(MN.bills || {}).filter(([, v]) => v && v.pre).map(([k]) => [k, true]));
   } else {
     const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
     d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
@@ -1091,7 +1153,7 @@ function estChecking() { const cur = homeYm(); return Calc.checklist(H(), S.mont
 
 function draftMonth(d) {
   return {
-    setup: true, budgets: d.budgets, checking: { amount: num(d.checking) !== null ? num(d.checking) : estChecking(), at: Date.now() }, bills: {},
+    setup: true, budgets: d.budgets, checking: { amount: num(d.checking) !== null ? num(d.checking) : estChecking(), at: Date.now() }, bills: preBills(d.pre || {}, d.ym),
     other: d.other, back: d.back, held: d.held, moved: null, ...(d.incoming ? { incoming: d.incoming } : {}),
   };
 }
@@ -1137,7 +1199,7 @@ function viewSetup() {
   } else if (d.step === 2) {
     const bills = (H().bills || []).map(b => {
       const hs = d.held.filter(h => h.bill === b.id);
-      return `<div class="line"><span>${D.ordinal(b.day)} · ${esc(b.name)}</span><b>${money(Calc.billAmount(b, N))}</b></div>`
+      return preBillRow(b, N, (d.pre || {})[b.id], 'd-pre')
         + hs.map(h => `<div class="check-row share-row ${h.received ? 'done' : ''}"><button class="box ${h.received ? 'on' : ''}" data-act="d-toggle" data-kind="held" data-id="${esc(h.id)}" aria-label="Received">${h.received ? '✓' : ''}</button><span class="grow">${esc(h.name)}’s share <span class="small muted">${h.received ? 'in checking' : 'not in yet'}</span></span><input class="mini" id="d-h-${esc(h.id)}" inputmode="decimal" value="${esc(h.amount)}"></div>`).join('');
     }).join('');
     const row = (kind, flag) => o => `<div class="check-row ${o[flag] ? 'done' : ''}"><button class="box ${o[flag] ? 'on' : ''}" data-act="d-toggle" data-kind="${kind}" data-id="${esc(o.id)}">${o[flag] ? '✓' : ''}</button><span class="grow">${esc(o.name)}</span><b>${money(o.amount)}</b><button class="x small" data-act="d-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></div>`;
@@ -1150,7 +1212,7 @@ function viewSetup() {
     };
     const add = kind => `<div class="add-row"><input id="d-${kind}-name" placeholder="What"><input id="d-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="d-add" data-kind="${kind}">Add</button></div>`;
     body = `<h2>Bills & extras for ${D.name(N)}</h2>
-      <h3>Automatic payments</h3>${bills}<p class="small muted">Check off shared payments that are already in. Change bills in Settings.</p>
+      <h3>Automatic payments</h3>${bills}<p class="small muted">Already see a bill taken out of the balance you typed? Tap “already came out” so it isn’t counted twice. Check off shared payments that are already in. Change bills in Settings.</p>
       <h3>Other expenses</h3><p class="small muted">One-time things this month. Check any that are already paid.</p>${rows('other', 'paid')}${add('other')}
       <h3>Additional income</h3><p class="small muted">Refunds or extra money you’re expecting this month.</p>${rows('back', 'received')}${add('back')}`;
   } else if (d.step === 3) {
@@ -1187,6 +1249,14 @@ function viewSetup() {
     <div class="row between">${d.step > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/review" data-act="d-cancel">Cancel</a>'}
       ${d.step < STEPS.length - 1 ? `<button class="btn" data-act="d-next">Next: ${STEPS[d.step + 1]}</button>` : ''}</div>`;
 }
+
+// A bill not due yet that already came out of checking (drafted early, or set up the night
+// before): marked so it's neither "still to come" nor subtracted again on its due date.
+function preBillRow(b, ym, on, act) {
+  const due = D.dueTime(ym, b.day) <= Date.now();
+  return `<div class="line pre-bill"><span>${D.ordinal(b.day)} · ${esc(b.name)}${due ? ' <span class="small muted">already out</span>' : ''}</span><span class="row gap">${due ? '' : `<button class="share ${on ? 'on' : ''}" data-act="${act}" data-id="${esc(b.id)}" aria-pressed="${!!on}">${on ? '✓' : '○'} already came out</button>`}<b>${money(Calc.billAmount(b, ym))}</b></span></div>`;
+}
+const preBills = (pre, ym) => Object.fromEntries((H().bills || []).filter(b => pre[b.id] && D.dueTime(ym, b.day) > Date.now()).map(b => [b.id, { pre: true }]));
 
 // Last setup step: keep a cushion in checking and suggest moving only what's above it.
 function moveChoice(excess, d) {
@@ -1229,7 +1299,7 @@ async function finishSetup(mode) {
   for (const e of Calc.earners(H())) pairs.push([['plans', N, e.id], nv(d.pay[e.id])]);
   if (!plans[R] || plans[R].endBalance === undefined) pairs.push([['plans', R, 'endBalance'], actual]);
   await B.setMonth(N, M);
-  await B.setMonthField(N, ['bills'], {});
+  await B.setMonthField(N, ['bills'], M.bills);
   await B.setH(pairs);
   if (M.moved) await setSavings(actual + M.moved, `${D.name(N)} setup`, M.moved > 0 ? 'in' : 'out');
   if (S.allocTx && S.allocTx.length) await addBucketTx(S.allocTx);
@@ -1238,6 +1308,90 @@ async function finishSetup(mode) {
   location.hash = '#/home';
   if (M.moved > 0) confetti();
   toast(`${D.name(N)} is set up${M.moved > 0 ? ` · ${money(M.moved)} to savings` : M.moved < 0 ? ` · ${money(-M.moved)} from savings` : ''}`);
+}
+
+/* ---------- First-time walkthrough (whoever starts a new household) ---------- */
+
+const WZ_STEPS = ['People & income', 'How you’ll use it', 'Budgets', 'Bills', 'Savings', 'This month'];
+const WZ_CATS = [['Pets', '🐾'], ['Kids', '🧸'], ['Gas', '⛽'], ['Personal', '💅'], ['Gifts', '🎁'], ['Medical', '🩺'], ['Eating out', '🍔']];
+const welcoming = () => !!(H() && H().welcomeBy && H().welcomeBy === me());
+
+function viewWelcome() {
+  S.wz = S.wz || { step: 0 };
+  const st = S.wz.step;
+  const h = H();
+  const sv = h.savings || {};
+  const people = Calc.earners(h);
+  const ym = homeYm();
+  const sw = (on, act, k, label) => `<button class="switch ${on ? 'on' : ''}" data-act="${act}" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${label}"><i></i></button>`;
+  let body = '';
+  if (st === 0) {
+    body = `<h2>Who earns money in your household?</h2><p class="muted">Add everyone whose paychecks go toward this budget.</p>
+      ${people.map(e => `<div class="edit-row"><input class="grow" data-ch="earner" data-id="${esc(e.id)}" value="${esc(e.name)}" aria-label="Name">${people.length > 1 ? `<button class="x small" data-act="person-del" data-id="${esc(e.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+      <button class="linkish small" data-act="person-add">+ Add a person</button>
+      <h3>Usual monthly income</h3><p class="small muted">Take-home pay in a normal month. You can plan raises, overtime and one-time money later.</p>
+      <div class="two">${people.map(e => `<label class="field"><span class="label">${esc(e.name)}</span><input data-ch="usual" data-f="${esc(e.id)}" inputmode="decimal" value="${esc((h.usual || {})[e.id])}" placeholder="$"></label>`).join('')}</div>`;
+  } else if (st === 1) {
+    const mode = h.trackMode || 'log';
+    body = `<h2>How you’ll use it</h2>
+      <h3>Tracking spending</h3>
+      <div class="seg">${[['log', 'Log'], ['import', 'Import'], ['both', 'Both']].map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-act="wz-track" data-v="${k}">${l}</button>`).join('')}</div>
+      <p class="small muted">${trackHelp(mode)}</p>
+      <div class="line feature"><span><b>Paychecks land in this checking account</b><span class="small muted">Turn on if paychecks arrive here during the month to pay for next month. You’ll check each one off as it comes in.</span></span>${sw(!!feat('payInChecking'), 'feature', 'payInChecking', 'Paychecks land in checking')}</div>
+      <div class="line feature"><span><b>Savings buckets</b><span class="small muted">Give savings jobs — emergency fund, car, vacation — each with its own goal.</span></span>${sw(!!feat('buckets'), 'feature', 'buckets', 'Savings buckets')}</div>
+      <p class="small muted">You can change any of these later in Settings → Setup.</p>`;
+  } else if (st === 2) {
+    const have = new Set(h.categories.map(c => c.name.toLowerCase()));
+    const sug = WZ_CATS.filter(([n]) => !have.has(n.toLowerCase()));
+    body = `<h2>Monthly budgets</h2><p class="muted">What you plan to spend each month on everyday things (not bills). Change the names and amounts, or remove any you don’t need.</p>
+      ${sug.length ? `<div class="chips wz-chips">${sug.map(([n, e]) => `<button class="chip" data-act="wz-cat" data-n="${esc(n)}" data-e="${e}">+ ${e} ${esc(n)}</button>`).join('')}</div>` : ''}
+      ${catsEditHtml(false)}`;
+  } else if (st === 3) {
+    body = `<h2>Bills</h2><p class="muted">Bills that come out of checking every month — rent, insurance, phone, car payment. Add each with its due day.</p>
+      ${billsEditHtml(false)}`;
+  } else if (st === 4) {
+    body = `<h2>Savings</h2>
+      <label class="field"><span class="label">How much is in savings right now?</span><input data-ch="wz-sav" inputmode="decimal" value="${esc(sv.actual || '')}" placeholder="$"></label>
+      <div class="three">
+        <label class="field"><span class="label">Always keep</span><input data-ch="goal" data-f="floor" inputmode="decimal" value="${esc(sv.floor)}"></label>
+        <label class="field"><span class="label">Minimum this year</span><input data-ch="goal" data-f="goalMin" inputmode="decimal" value="${esc(sv.goalMin)}"></label>
+        <label class="field"><span class="label">Goal this year</span><input data-ch="goal" data-f="goalMax" inputmode="decimal" value="${esc(sv.goalMax)}"></label>
+      </div>
+      <label class="field"><span class="label">Cushion to keep in checking</span><input data-ch="goal" data-f="buffer" inputmode="decimal" value="${esc(checkingBuffer())}"></label>
+      <p class="small muted">Each month, anything above the cushion can move to savings.${bucketsOn() ? ' Set up your buckets anytime from the Year tab → Savings right now.' : ''}</p>`;
+  } else {
+    body = `<h2>Let’s start ${D.name(ym)}</h2><p class="muted">What does your checking account show right now?</p>
+      <label class="amount move-amt"><span>$</span><input id="wz-checking" inputmode="decimal" value="${esc(S.wz.checking || '')}" aria-label="Checking balance"></label>
+      <p class="small muted">Bills already due this month are treated as paid. Budgets start at your normal amounts.</p>
+      ${(h.bills || []).some(b => D.dueTime(ym, b.day) > Date.now()) ? `<h3>Bills coming up</h3><p class="small muted">Any of these already taken out of that balance? Tap “already came out” so they aren’t counted twice.</p>
+        ${(h.bills || []).filter(b => D.dueTime(ym, b.day) > Date.now()).map(b => preBillRow(b, ym, (S.wz.pre || {})[b.id], 'wz-pre')).join('')}` : ''}
+      ${Store.configured && h.joinCode ? `<h3>Share with your household</h3><p class="small muted">Anyone joining makes an account, taps “Join with a code” and types:</p><div class="code">${esc(h.joinCode)}</div>` : ''}
+      <button class="btn full" data-act="wz-finish">Finish setup</button>`;
+  }
+  return `<header class="hero small-hero"><h1>Welcome!</h1><div class="hero-sub">Let’s set up your budget · <button class="linkish small" data-act="wz-skip">skip for now</button></div></header>
+    <div class="steps">${WZ_STEPS.map((s, i) => `<span class="${i === st ? 'on' : i < st ? 'done' : ''}" title="${s}"></span>`).join('')}</div>
+    <section class="card setup">${body}</section>
+    <div class="row between">${st > 0 ? '<button class="btn ghost" data-act="wz-back">Back</button>' : '<span></span>'}
+      ${st < WZ_STEPS.length - 1 ? `<button class="btn" data-act="wz-next">Next: ${WZ_STEPS[st + 1]}</button>` : ''}</div>`;
+}
+
+async function finishWelcome(skipped) {
+  const ym = homeYm();
+  if (!skipped && !(S.months[ym] && S.months[ym].setup)) {
+    const amount = num(S.wz && S.wz.checking);
+    const M = {
+      setup: true, setupAt: Date.now(), bills: preBills((S.wz && S.wz.pre) || {}, ym), other: [], back: [], moved: null,
+      budgets: Object.fromEntries(H().categories.map(c => [c.id, Number(c.budget) || 0])),
+      held: (H().helpers || []).map(x => ({ ...x, received: false })),
+      checking: { amount: amount === null ? 0 : amount, at: Date.now() },
+      ...(payInChecking() ? { incoming: [] } : {}),
+    };
+    await B.setMonth(ym, M);
+  }
+  await B.setH([[['welcomeBy'], B.DEL]]);
+  S.wz = null;
+  location.hash = '#/home';
+  if (!skipped) { confetti(); toast('You’re all set 🎉'); }
 }
 
 /* ---------- Set up next year (December / January, from Review) ---------- */
@@ -1462,7 +1616,31 @@ function viewSettings() {
   return `<header class="hero small-hero ink-title"><a class="back" href="#/home">‹ Home</a><h1>Settings</h1>
     <a class="gear" href="#/settings/look" aria-label="Appearance">${icons.gallery}</a></header>
 
-  ${fold('cats', 'Categories', money(catTotal), `<p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>
+  ${fold('cats', 'Categories', money(catTotal), `${catsEditHtml()}`)}
+
+  ${fold('bills', 'Bills', money(billTotal), `${billsEditHtml()}`)}
+
+  ${fold('tags', 'Stores & tags', '', `<h3>Stores</h3><div class="chips">${(h.stores || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="stores" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
+    <div class="add-row"><input id="stores-new" placeholder="Add a store"><button class="btn small" data-act="list-add" data-kind="stores">Add</button></div>
+    <h3>Tags</h3><p class="small muted">For tracking things inside a category — like Diapers (in Twins) or Eating out (in Food).</p>
+    <div class="chips">${(h.tags || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="tags" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
+    <div class="add-row"><input id="tags-new" placeholder="Add a tag"><button class="btn small" data-act="list-add" data-kind="tags">Add</button></div>`)}
+
+  ${monthlyTotalCard()}
+
+  <a class="card menu-row" href="#/settings/setup"><span><b>Setup</b><span class="small muted">Your name, people & income, features, how you track spending, savings goals, household</span></span><span class="chev">›</span></a>`;
+}
+
+const trackHelp = mode => ({
+  log: 'Tap + Log after each purchase. Quick, and you always know where you stand.',
+  import: 'Download your bank’s transactions (CSV) every week or so and import them — the app sorts them into categories and learns your stores.',
+  both: 'Log purchases as you go, and import your bank file every week or so to catch anything you missed. Purchases you already logged are matched and marked ✓ bank — never added twice.',
+}[mode]);
+
+// Category and bill editors (Settings, and the first-time walkthrough).
+function catsEditHtml(intro = true) {
+  const h = H();
+  return `${intro ? '<p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>' : ''}
     ${h.categories.map((c, i) => `<div class="edit-row">
       <input class="emoji-in" data-ch="cat" data-id="${esc(c.id)}" data-f="emoji" value="${esc(c.emoji || '')}" aria-label="Emoji">
       <input class="grow" data-ch="cat" data-id="${esc(c.id)}" data-f="name" value="${esc(c.name)}" aria-label="Name">
@@ -1470,9 +1648,11 @@ function viewSettings() {
       <button class="x small" data-act="cat-up" data-id="${esc(c.id)}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
       <button class="x small" data-act="cat-del" data-id="${esc(c.id)}" aria-label="Remove">×</button></div>`).join('')}
     <div class="line subtotal"><span>Categories total</span><b>${money(h.categories.reduce((a, c) => a + (Number(c.budget) || 0), 0))}</b></div>
-    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>`)}
-
-  ${fold('bills', 'Bills', money(billTotal), `<p class="small muted">Automatic payments: due day, name, amount. Schedule a change when an amount is going up or down.</p>
+    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>`;
+}
+function billsEditHtml(intro = true) {
+  const h = H();
+  return `${intro ? '<p class="small muted">Automatic payments: due day, name, amount. Schedule a change when an amount is going up or down.</p>' : ''}
     ${(h.bills || []).map(b => `<div class="bill-edit">
       <div class="edit-row"><input class="mini day-in" data-ch="bill" data-id="${esc(b.id)}" data-f="day" inputmode="numeric" value="${esc(b.day)}" aria-label="Due day">
       <input class="grow" data-ch="bill" data-id="${esc(b.id)}" data-f="name" value="${esc(b.name)}" aria-label="Name">
@@ -1488,17 +1668,7 @@ function viewSettings() {
       <details class="small"><summary>Schedule a change</summary><div class="add-row"><input type="month" id="chg-m-${esc(b.id)}" value="${D.addMonths(homeYm(), 1)}"><input id="chg-a-${esc(b.id)}" inputmode="decimal" placeholder="New $"><button class="btn small" data-act="chg-add" data-id="${esc(b.id)}">Add</button></div></details>
     </div>`).join('')}
     <div class="line subtotal"><span>Bills total</span><b>${money((h.bills || []).reduce((a, b) => a + (Number(b.amount) || 0), 0))}</b></div>
-    <div class="add-row"><input id="bill-day" class="mini" inputmode="numeric" placeholder="Day"><input id="bill-name" placeholder="New bill"><input id="bill-amt" class="mini" inputmode="decimal" placeholder="$"><button class="btn small" data-act="bill-add">Add</button></div>`)}
-
-  ${fold('tags', 'Stores & tags', '', `<h3>Stores</h3><div class="chips">${(h.stores || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="stores" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
-    <div class="add-row"><input id="stores-new" placeholder="Add a store"><button class="btn small" data-act="list-add" data-kind="stores">Add</button></div>
-    <h3>Tags</h3><p class="small muted">For tracking things inside a category — like Diapers (in Twins) or Eating out (in Food).</p>
-    <div class="chips">${(h.tags || []).map(s => `<span class="chip on">${esc(s)} <button class="chip-x" data-act="list-del" data-kind="tags" data-v="${esc(s)}" aria-label="Remove">×</button></span>`).join('')}</div>
-    <div class="add-row"><input id="tags-new" placeholder="Add a tag"><button class="btn small" data-act="list-add" data-kind="tags">Add</button></div>`)}
-
-  ${monthlyTotalCard()}
-
-  <a class="card menu-row" href="#/settings/setup"><span><b>Setup</b><span class="small muted">Your name, people & income, features, how you track spending, savings goals, household</span></span><span class="chev">›</span></a>`;
+    <div class="add-row"><input id="bill-day" class="mini" inputmode="numeric" placeholder="Day"><input id="bill-name" placeholder="New bill"><input id="bill-amt" class="mini" inputmode="decimal" placeholder="$"><button class="btn small" data-act="bill-add">Add</button></div>`;
 }
 
 // A Settings card that opens and closes with the arrow in its header (all start closed when you come into Settings).
@@ -1535,10 +1705,8 @@ function viewSettingsSetup() {
     }).join('')}
   </section>
   <section class="card"><h2>How we track spending</h2>
-    <div class="seg">${[['log', 'Log as we go'], ['import', 'Weekly import']].map(([k, l]) => `<button class="${(h.trackMode || 'log') === k ? 'on' : ''}" data-act="track" data-v="${k}">${l}</button>`).join('')}</div>
-    <p class="small muted">${(h.trackMode || 'log') === 'import'
-      ? 'Download your Navy Federal transactions (CSV) and tap Import on the $ page. You can still add cash purchases by hand.'
-      : 'Tap + Log after each purchase.'}</p>
+    <div class="seg">${[['log', 'Log'], ['import', 'Import'], ['both', 'Both']].map(([k, l]) => `<button class="${(h.trackMode || 'log') === k ? 'on' : ''}" data-act="track" data-v="${k}">${l}</button>`).join('')}</div>
+    <p class="small muted">${trackHelp(h.trackMode || 'log')}</p>
     ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
       ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
         <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
@@ -1762,12 +1930,16 @@ const acts = {
   'imp-split-del': el => { S.imp.rows[el.dataset.i].splits.splice(Number(el.dataset.j), 1); render(true); },
   'imp-split-off': el => { S.imp.rows[el.dataset.i].splits = null; render(true); },
   'imp-save': () => saveImport(),
+  'imp-logged': () => { S.imp.showLogged = !S.imp.showLogged; render(true); },
+  'imp-unmatch': el => { const r = S.imp.rows[Number(el.dataset.i)]; Object.assign(r, { status: 'review', matchId: null, firstNeeds: !r.cat, reason: r.cat ? 'Added even though it looked logged' : 'Pick a category' }); render(true); },
+  'imp-close': el => { const r = S.imp.rows[Number(el.dataset.i)]; r.closeSame = false; r.close = null; r.firstNeeds = !r.cat; render(true); },
   track: async el => {
     const v = el.dataset.v;
     if (v === (H().trackMode || 'log')) return;
     const ok = await ask(v === 'import'
-      ? 'Switch to weekly import? + Log becomes Import. Purchases you’ve already logged stay — just don’t import the same days you logged by hand.'
-      : 'Switch back to logging as you go? Imported purchases stay.', 'Switch');
+      ? 'Switch to import only? + Log becomes Import. Purchases you’ve already logged stay — just don’t import the same days you logged by hand.'
+      : v === 'both' ? 'Switch to both? Keep logging with + Log, and import every week or so — anything you already logged is matched, not added twice.'
+      : 'Switch back to logging only? Imported purchases stay.', 'Switch');
     if (ok) await B.setH([[['trackMode'], v]]);
   },
   'rule-del': async el => { const rules = { ...(H().rules || {}) }; delete rules[el.dataset.k]; await B.setH([[['rules'], rules]]); },
@@ -1952,7 +2124,6 @@ const acts = {
     const on = !(k === 'overview' ? overviewOn() : feat(k));
     await B.setH([[['features', k], on]]);
   },
-  'setup-file': () => pickSetupFile(async data => { await Demo.loadSetup(data); toast('Setup file loaded'); }),
   yr: el => { S.year = Math.max(firstYear(), (S.year || D.yearOf(homeYm())) + Number(el.dataset.d)); render(); },
   'all-months': el => { for (const ym of el.dataset.yms.split(',')) S.open[ym] = el.dataset.open === '1'; render(); },
   expand: el => { S.open[el.dataset.ym] = el.dataset.open !== '1'; render(); },
@@ -2048,6 +2219,12 @@ const acts = {
   },
   'd-in-add': () => { readDraftInputs(); S.draft.incoming.push({ id: newId(), name: `Paycheck ${S.draft.incoming.length + 1}`, amount: 0, received: false }); render(); },
   'd-finish': el => finishSetup(el.dataset.mode),
+  'wz-next': () => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.step++; window.scrollTo(0, 0); render(true); },
+  'wz-back': () => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.step--; window.scrollTo(0, 0); render(true); },
+  'wz-track': async el => { await B.setH([[['trackMode'], el.dataset.v]]); },
+  'wz-cat': async el => { await B.setH([[['categories'], [...H().categories, { id: newId(), name: el.dataset.n, emoji: el.dataset.e, budget: 0 }]]]); },
+  'wz-finish': () => { S.wz.checking = $('#wz-checking').value; finishWelcome(false); },
+  'wz-skip': async () => { if (await ask('Skip setup for now? You can fill everything in later in Settings.', 'Skip')) finishWelcome(true); },
   'ny-next': () => { readNYInputs(); S.ny.step++; window.scrollTo(0, 0); render(); },
   'ny-back': () => { readNYInputs(); S.ny.step--; window.scrollTo(0, 0); render(); },
   'ny-cancel': () => { S.ny = null; },
@@ -2089,6 +2266,8 @@ const acts = {
     render(true);
   },
   'ny-uc-del': el => { readNYInputs(); S.ny.usualChanges = S.ny.usualChanges.filter(c => c.id !== el.dataset.id); render(true); },
+  'd-pre': el => { readDraftInputs(); const d = S.draft; d.pre = d.pre || {}; d.pre[el.dataset.id] = !d.pre[el.dataset.id]; render(true); },
+  'wz-pre': el => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.pre = S.wz.pre || {}; S.wz.pre[el.dataset.id] = !S.wz.pre[el.dataset.id]; render(true); },
   'd-showmove': () => { readDraftInputs(); S.draft.showMove = true; render(); },
 
   'cat-add': async () => {
@@ -2303,6 +2482,7 @@ const changes = {
     await B.setH([[['earners'], Calc.earners(H()).map(e => (e.id === el.dataset.id ? { ...e, name } : e))]]);
   },
   usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
+  'wz-sav': async el => { const v = num(el.value); if (v !== null) await setSavings(v, 'Starting balance'); },
   'ny-pick': el => { S.ny[el.dataset.f] = el.value; },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
   font: async el => { await B.setH([[['look', el.dataset.f], el.value]]); },
@@ -2380,32 +2560,17 @@ function authScreen(mode = 'in', msg = '') {
   };
 }
 
-// Read a setup file (JSON) someone was given to fill in a new household.
-function pickSetupFile(cb) {
-  const f = $('#file');
-  f.value = '';
-  f.accept = '.json,application/json';
-  f.onchange = async () => {
-    const file = f.files[0];
-    f.accept = 'image/*';
-    if (!file) return;
-    try { await cb(JSON.parse(await file.text())); } catch (e) { console.error(e); toast('That setup file couldn’t be read'); }
-  };
-  f.click();
-}
-
 function householdScreen(msg = '') {
   $('#tabs').hidden = true;
   view.innerHTML = `<div class="auth"><img class="logo" src="icon-192.png" alt=""><h1>Welcome, ${esc(S.user.name || S.newName || '')}</h1>
     ${msg ? `<p class="msg">${esc(msg)}</p>` : ''}
-    <section class="card"><h2>Start a budget</h2><p class="small muted">Starts blank — add your categories, bills and income in Settings. If someone gave you a setup file, load it instead.</p>
-      <button class="btn full" id="h-new">Start blank</button><button class="btn full ghost" id="h-file" style="margin-top:8px">Load setup file</button></section>
+    <section class="card"><h2>Start a budget</h2><p class="small muted">We’ll walk through your income, budgets, bills and savings — about 5 minutes.</p>
+      <button class="btn full" id="h-new">Start a new budget</button></section>
     <section class="card"><h2>Join with a code</h2><p class="small muted">If the other person already started, enter the code from their Settings.</p>
       <input id="h-code" placeholder="8-letter code" autocapitalize="characters"><button class="btn full ghost" id="h-join">Join</button></section>
     <p class="center small"><button class="linkish" id="h-out">Sign out</button></p></div>`;
   const name = S.user.name || S.newName || 'Me';
   $('#h-new').onclick = async () => { try { const id = await Store.createHousehold(name); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } };
-  $('#h-file').onclick = () => pickSetupFile(async data => { try { const id = await Store.createHousehold(name, data); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } });
   $('#h-join').onclick = async () => { try { const id = await Store.joinHousehold($('#h-code').value, name); openHousehold(id); } catch (e) { console.error(e); householdScreen(e.message); } };
   $('#h-out').onclick = () => Store.signOut();
 }
