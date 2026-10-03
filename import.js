@@ -157,9 +157,8 @@ const Imp = (() => {
       if (rule && rule.action === 'cat') { row.cat = rule.cat; row.tags = [...(rule.tags || [])]; row.reason = 'From your rule'; return row; }
       const guess = BANK[(rec.bankCat || '').toLowerCase()];
       if (guess && guess.ask) { row.ask = true; row.tags = [...(guess.tags || [])]; row.reason = `${rec.bankCat} — pick a category`; return row; }
-      if (guess) { row.cat = guess.cat; row.tags = [...(guess.tags || [])]; row.reason = `Bank says ${rec.bankCat}`; row.remember = true; return row; }
+      if (guess) { row.cat = guess.cat; row.tags = [...(guess.tags || [])]; row.reason = `Bank says ${rec.bankCat}`; return row; }
       row.reason = rec.bankCat ? `Bank says ${rec.bankCat}` : 'New store';
-      row.remember = true;
       return row;
     });
     // Rows the categories list doesn't know (e.g. a deleted category) need a pick.

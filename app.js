@@ -74,6 +74,64 @@ function ask(text, ok = 'OK', cancel = 'Cancel') {
   });
 }
 
+// Same dialog with a text box; resolves to the typed text, or null if cancelled.
+function askText(text, placeholder = '', ok = 'Add') {
+  return new Promise(res => {
+    $('#dialog').innerHTML = `<p>${text}</p><input id="dialog-in" placeholder="${esc(placeholder)}" autocapitalize="sentences"><div class="row end" style="margin-top:10px">
+      <button class="btn ghost" data-d="0">Cancel</button><button class="btn" data-d="1">${esc(ok)}</button></div>`;
+    $('#dialog-wrap').hidden = false;
+    const inp = $('#dialog-in');
+    setTimeout(() => inp.focus(), 50);
+    const done = yes => { $('#dialog-wrap').hidden = true; res(yes ? inp.value.trim() || null : null); };
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); done(true); } };
+    $('#dialog').onclick = e => { const b = e.target.closest('[data-d]'); if (b) done(b.dataset.d === '1'); };
+  });
+}
+
+// "+ New tag…" from a tag picker: adds it to the household's tags and returns its name.
+async function newTag() {
+  const v = await askText('New tag', 'e.g. Birthday');
+  if (!v) return null;
+  const have = (H().tags || []).find(x => x.toLowerCase() === v.toLowerCase());
+  if (have) return have;
+  await B.setH([[['tags'], [...(H().tags || []), v]]]);
+  return v;
+}
+
+/* Date picker drawn by the app (the phone's own one can't be styled): Today /
+   Yesterday buttons and a small calendar. A hidden input holds the date, so
+   forms read #id.value exactly like before. */
+function datePicker(id, value) {
+  return `<div class="dp">${dpInner(id, value, D.ymOf(value), false)}</div>`;
+}
+function dpInner(id, value, view, open) {
+  const today = D.today();
+  const yest = D.dayStr(new Date(Date.now() - 864e5));
+  const nice = x => new Date(`${x}T12:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const other = value !== today && value !== yest;
+  let cal = '';
+  if (open) {
+    const [y, m] = view.split('-').map(Number);
+    const blanks = new Date(y, m - 1, 1).getDay();
+    const cells = Array.from({ length: blanks }, () => '<span></span>').join('') + Array.from({ length: D.daysIn(view) }, (_, i) => {
+      const v = `${view}-${D.pad(i + 1)}`;
+      return `<button type="button" class="${v === value ? 'on' : ''} ${v === today ? 'today' : ''}" data-act="dp-day" data-v="${v}" ${v > today ? 'disabled' : ''}>${i + 1}</button>`;
+    }).join('');
+    cal = `<div class="dp-cal"><div class="dp-head"><button type="button" class="nav" data-act="dp-nav" data-d="-1" aria-label="Previous month">‹</button><b>${D.label(view)}</b>
+      <button type="button" class="nav" data-act="dp-nav" data-d="1" aria-label="Next month" ${view >= D.curYm() ? 'disabled' : ''}>›</button></div>
+      <div class="dp-grid">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(x => `<span class="dp-dow">${x}</span>`).join('')}${cells}</div></div>`;
+  }
+  return `<input type="hidden" id="${id}" value="${esc(value)}" data-view="${view}" data-open="${open ? 1 : 0}">
+    <div class="seg dp-seg">${[['Today', today], ['Yesterday', yest]].map(([l, v]) => `<button type="button" class="${value === v ? 'on' : ''}" data-act="dp-pick" data-v="${v}">${l}</button>`).join('')}
+      <button type="button" class="${other ? 'on' : ''}" data-act="dp-open">${other ? nice(value) : 'Other day'} ▾</button></div>
+    ${other ? '' : `<div class="small muted dp-sel">${nice(value)}</div>`}${cal}`;
+}
+function dpSet(el, value, view, open) {
+  const box = el.closest('.dp');
+  const inp = box.querySelector('input[type="hidden"]');
+  box.innerHTML = dpInner(inp.id, value ?? inp.value, view ?? inp.dataset.view, open ?? inp.dataset.open === '1');
+}
+
 function confetti() {
   if (!calm()) return;
   const box = $('#confetti');
@@ -328,10 +386,8 @@ function logHtml() {
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
   <div class="field"><span class="label">Tags <span class="muted small">(optional — for tracking things like diapers)</span></span><div class="chips">${(H().tags || []).map(t => chip('l-tag', t, L.tags.includes(t), esc(t))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="tags">+ New</button></div></div>
-  <div class="two">
-    <label class="field"><span class="label">Date</span><input id="l-date" type="date" value="${esc(L.date)}"></label>
-    <label class="field"><span class="label">Note</span><input id="l-note" placeholder="optional" value="${esc(L.note)}"></label>
-  </div>
+  <div class="field"><span class="label">Date</span>${datePicker('l-date', L.date)}</div>
+  <label class="field"><span class="label">Note</span><input id="l-note" placeholder="optional" value="${esc(L.note)}"></label>
   <div class="field"><span class="label">Bulk buy? Spread it over</span><div class="seg">${[1, 2, 3, 4, 6].map(n => `<button type="button" class="${Number(L.spread) === n ? 'on' : ''}" data-act="l-spread" data-v="${n}">${n === 1 ? 'Just this month' : n + ' months'}</button>`).join('')}</div></div>
   <div class="row end sheet-foot">${L.id ? '<button class="btn ghost danger" data-act="l-del">Delete</button>' : ''}<button class="btn" data-act="l-save">${L.id ? 'Save' : 'Log it'}</button></div>`;
 }
@@ -822,7 +878,7 @@ function openBucket(id) {
     <div class="two"><label class="field"><span class="label">Amount</span><input id="bk-amt" inputmode="decimal" placeholder="$"></label>
       ${S.bkMode === 'move'
         ? `<label class="field"><span class="label">Move to</span><select id="bk-to">${others.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></label>`
-        : `<label class="field"><span class="label">Date</span><input id="bk-date" type="date" value="${D.today()}"></label>`}</div>
+        : `<div class="field"><span class="label">Date</span>${datePicker('bk-date', D.today())}</div>`}</div>
     <label class="field"><span class="label">${S.bkMode === 'spend' ? 'What was it for?' : 'Note'}</span><input id="bk-note" placeholder="${S.bkMode === 'spend' ? 'e.g. Oil change (Walmart)' : 'optional'}"></label>
     <p class="small muted">${S.bkMode === 'spend' ? 'Money that left savings. Lowers this bucket and your savings — its % next month stays the same.' : S.bkMode === 'add' ? 'New money into savings for this bucket (raises your savings too).' : 'Moves money between buckets. Your savings total doesn’t change.'}</p>
     <button class="btn full" data-act="bk-save" data-id="${esc(id)}">${S.bkMode === 'spend' ? 'Save spending' : S.bkMode === 'add' ? 'Add it' : 'Move it'}</button>
@@ -956,6 +1012,34 @@ const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''
   + `<option value="uncat" ${sel === 'uncat' ? 'selected' : ''}>Uncategorized (decide later)</option>`
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
 
+// Splitting an imported charge: the last split you haven't typed in takes whatever's left.
+function splitFill(r) {
+  const free = r.splits.map((sp, j) => j).filter(j => !r.splits[j].touched);
+  if (!free.length) return null;
+  const j = free[free.length - 1];
+  const others = r.splits.reduce((a, sp, k) => a + (k === j ? 0 : Number(sp.amount) || 0), 0);
+  r.splits[j].amount = Math.max(0, round2(r.amount - others));
+  return j;
+}
+function splitSumHtml(r) {
+  const left = round2(r.amount - r.splits.reduce((a, x) => a + (Number(x.amount) || 0), 0));
+  const txt = Math.abs(left) < 0.005 ? `✓ Adds up to ${money(r.amount)}` : left > 0 ? `${money(left)} left to split` : `Over by ${money(-left)}`;
+  return `<b id="split-sum-${r.i}" class="${Math.abs(left) < 0.005 ? 'save-good' : 'warn'}">${txt}</b>`;
+}
+
+// "Always…" checkbox: remember this store's category and/or tags for next time.
+// Starts unchecked, so one-off purchases (Amazon, Target…) don't make a rule.
+function rememberHtml(r) {
+  if (r.venmo || r.splits) return '';
+  if (r.cat === 'skip') return `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>`;
+  const cat = r.cat && !['skip', 'uncat'].includes(r.cat) ? catById(r.cat) : null;
+  if (!cat && !r.tags.length) return '';
+  const tags = r.tags.map(esc).join(', ');
+  const label = cat && tags ? `Always put ${esc(r.name)} in ${esc(cat.name)} and tag it ${tags}`
+    : cat ? `Always put ${esc(r.name)} in ${esc(cat.name)}` : `Always tag ${esc(r.name)} ${tags}`;
+  return `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${label}</label>`;
+}
+
 function impRow(r) {
   if (r.status === 'logged') {
     return `<div class="imp-row logged"><div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
@@ -976,16 +1060,16 @@ function impRow(r) {
   }
   const needs = !r.cat && !r.splits;
   const tagChips = r.tags.map(t => `<span class="tag">${esc(t)} <button class="chip-x" data-act="imp-untag" data-i="${r.i}" data-v="${esc(t)}" aria-label="Remove tag">×</button></span>`).join('');
-  const split = r.splits ? `<div class="splits">${r.splits.map((sp, j) => `<div class="edit-row"><input class="mini" data-ch="imp-split-amt" data-i="${r.i}" data-j="${j}" inputmode="decimal" value="${sp.amount}"><select data-ch="imp-split-cat" data-i="${r.i}" data-j="${j}">${catOptions(sp.cat)}</select><select class="split-tag" data-ch="imp-split-tag" data-i="${r.i}" data-j="${j}" aria-label="Tag"><option value="">Tag</option>${(H().tags || []).map(t => `<option ${sp.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>${j ? `<button class="x small" data-act="imp-split-del" data-i="${r.i}" data-j="${j}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
-      <div class="small ${Math.abs(r.splits.reduce((a, x) => a + (Number(x.amount) || 0), 0) - r.amount) > 0.004 ? 'warn' : 'muted'}">Split total ${money(r.splits.reduce((a, x) => a + (Number(x.amount) || 0), 0))} of ${money(r.amount)} · <button class="linkish small" data-act="imp-split-add" data-i="${r.i}">+ another</button> · <button class="linkish small" data-act="imp-split-off" data-i="${r.i}">undo split</button></div></div>` : '';
+  const split = r.splits ? `<div class="splits">${r.splits.map((sp, j) => `<div class="edit-row"><input class="mini" data-ch="imp-split-amt" data-i="${r.i}" data-j="${j}" inputmode="decimal" value="${sp.amount}"><select data-ch="imp-split-cat" data-i="${r.i}" data-j="${j}">${catOptions(sp.cat)}</select><select class="split-tag" data-ch="imp-split-tag" data-i="${r.i}" data-j="${j}" aria-label="Tag"><option value="">Tag</option>${(H().tags || []).map(t => `<option ${sp.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>${j ? `<button class="x small" data-act="imp-split-del" data-i="${r.i}" data-j="${j}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+      <div class="small">${splitSumHtml(r)} · <button class="linkish small" data-act="imp-split-add" data-i="${r.i}">+ another</button> · <button class="linkish small" data-act="imp-split-off" data-i="${r.i}">undo split</button></div></div>` : '';
   return `<div class="imp-row ${needs ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
     <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount))}${r.amount < 0 ? ' <span class="small muted">back</span>' : ''}</b></div>
     <div class="small muted">${esc(r.reason)}</div>
     ${r.splits ? split : `<div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Category">${catOptions(r.cat, true)}</select>
-      ${r.cat !== 'skip' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}</select>
+      ${r.cat !== 'skip' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>
       ${r.amount > 0 ? `<button class="btn ghost small" data-act="imp-split" data-i="${r.i}">Split</button>` : ''}` : ''}</div>`}
     ${tagChips ? `<div class="tags">${tagChips}</div>` : ''}
-    ${!r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always use this for ${esc(r.name)}</label>` : ''}
+    ${rememberHtml(r)}
   </div>`;
 }
 
@@ -1062,7 +1146,10 @@ async function saveImport() {
     } else {
       purchases.push({ ...base, amount: r.amount, cat: r.cat || 'uncat', tags: [...r.tags] });
     }
-    if (r.remember && !r.ask && !r.venmo && r.cat && r.cat !== 'uncat' && !r.splits) rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
+    if (r.remember && !r.venmo && !r.splits) {
+      if (r.cat && r.cat !== 'uncat') rules[r.ruleKey] = { action: 'cat', cat: r.cat, tags: [...r.tags], name: r.name };
+      else if (r.tags.length) rules[r.ruleKey] = { action: 'ask', tags: [...r.tags], name: r.name };
+    }
   }
   if (purchases.length) await B.savePurchases(purchases);
   for (const p of confirm) await B.savePurchase(p);
@@ -1926,10 +2013,20 @@ const acts = {
   'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
   'imp-untag': el => { const r = S.imp.rows[el.dataset.i]; r.tags = r.tags.filter(t => t !== el.dataset.v); render(true); },
   'imp-split': el => { const r = S.imp.rows[el.dataset.i]; r.splits = [{ amount: r.amount, cat: r.cat && !['skip', 'uncat'].includes(r.cat) ? r.cat : '' }, { amount: 0, cat: '' }]; render(true); },
-  'imp-split-add': el => { S.imp.rows[el.dataset.i].splits.push({ amount: 0, cat: '' }); render(true); },
-  'imp-split-del': el => { S.imp.rows[el.dataset.i].splits.splice(Number(el.dataset.j), 1); render(true); },
+  'imp-split-add': el => {
+    const r = S.imp.rows[el.dataset.i];
+    r.splits.forEach(sp => { sp.touched = true; });
+    r.splits.push({ amount: 0, cat: '' });
+    splitFill(r);
+    render(true);
+  },
+  'imp-split-del': el => { const r = S.imp.rows[el.dataset.i]; r.splits.splice(Number(el.dataset.j), 1); splitFill(r); render(true); },
   'imp-split-off': el => { S.imp.rows[el.dataset.i].splits = null; render(true); },
   'imp-save': () => saveImport(),
+  'dp-pick': el => dpSet(el, el.dataset.v, D.ymOf(el.dataset.v), false),
+  'dp-day': el => dpSet(el, el.dataset.v, null, false),
+  'dp-open': el => { const inp = el.closest('.dp').querySelector('input[type="hidden"]'); dpSet(el, null, D.ymOf(inp.value), inp.dataset.open !== '1'); },
+  'dp-nav': el => { const inp = el.closest('.dp').querySelector('input[type="hidden"]'); dpSet(el, null, D.addMonths(inp.dataset.view, Number(el.dataset.d)), true); },
   'imp-logged': () => { S.imp.showLogged = !S.imp.showLogged; render(true); },
   'imp-unmatch': el => { const r = S.imp.rows[Number(el.dataset.i)]; Object.assign(r, { status: 'review', matchId: null, firstNeeds: !r.cat, reason: r.cat ? 'Added even though it looked logged' : 'Pick a category' }); render(true); },
   'imp-close': el => { const r = S.imp.rows[Number(el.dataset.i)]; r.closeSame = false; r.close = null; r.firstNeeds = !r.cat; render(true); },
@@ -2440,14 +2537,23 @@ const changes = {
   'imp-cat': el => {
     const r = S.imp.rows[el.dataset.i];
     r.cat = el.value;
-    if (r.cat === 'skip') r.remember = false;
+    r.remember = false;
     render(true);
   },
-  'imp-tag': el => { const r = S.imp.rows[el.dataset.i]; if (el.value && !r.tags.includes(el.value)) r.tags.push(el.value); render(true); },
+  'imp-tag': async el => {
+    const r = S.imp.rows[el.dataset.i];
+    const v = el.value === '__new' ? await newTag() : el.value;
+    if (v && !r.tags.includes(v)) r.tags.push(v);
+    render(true);
+  },
   'imp-bal': el => { S.imp.bal = el.value; },
   'imp-remember': el => { S.imp.rows[el.dataset.i].remember = el.checked; },
-  'imp-split-amt': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].amount = num(el.value) || 0; render(true); },
-  'imp-split-tag': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].tag = el.value; },
+  'imp-split-amt': el => { const r = S.imp.rows[el.dataset.i]; Object.assign(r.splits[el.dataset.j], { amount: num(el.value) || 0, touched: true }); splitFill(r); render(true); },
+  'imp-split-tag': async el => {
+    const sp = S.imp.rows[el.dataset.i].splits[el.dataset.j];
+    if (el.value === '__new') { const v = await newTag(); if (v) sp.tag = v; render(true); return; }
+    sp.tag = el.value;
+  },
   'imp-split-cat': el => { S.imp.rows[el.dataset.i].splits[el.dataset.j].cat = el.value; render(true); },
   rule: async el => {
     const rules = { ...(H().rules || {}) };
@@ -2502,6 +2608,14 @@ document.addEventListener('input', e => {
     const sum = $('#alloc-sum'); if (sum) sum.innerHTML = allocSumHtml();
     const btn = $('#alloc-save');
     if (btn) { btn.textContent = allocSaveLabel(); btn.disabled = S.alloc.amount < 0 && Math.abs(allocLeft()) > 0.004; }
+  }
+  // Splitting an import: show what's left (and fill the next split) while typing.
+  if (e.target.matches('[data-ch="imp-split-amt"]') && S.imp) {
+    const r = S.imp.rows[e.target.dataset.i];
+    Object.assign(r.splits[e.target.dataset.j], { amount: num(e.target.value) || 0, touched: true });
+    const j = splitFill(r);
+    if (j !== null) { const box = view.querySelector(`[data-ch="imp-split-amt"][data-i="${r.i}"][data-j="${j}"]`); if (box && box !== e.target) box.value = r.splits[j].amount; }
+    const sum = $(`#split-sum-${r.i}`); if (sum) sum.outerHTML = splitSumHtml(r);
   }
   if (e.target.id === 'mv-hysa') { const l = $('#hysa-left'); if (l) l.textContent = money(Number(e.target.dataset.actual) - Math.max(0, num(e.target.value) || 0)); }
   if (e.target.matches('[data-ch="glass"]')) document.documentElement.style.setProperty('--glass', e.target.value);
