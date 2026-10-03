@@ -1498,12 +1498,14 @@ async function finishSetup(mode) {
 
 /* ---------- First-time walkthrough (whoever starts a new household) ---------- */
 
-const WZ_STEPS = ['People & income', 'How you’ll use it', 'Budgets', 'Bills', 'Savings', 'This month'];
+const WZ_STEPS = ['People & income', 'How you’ll use it', 'Budgets', 'Bills', 'Savings', 'Anything else?', 'This month'];
 const WZ_CATS = [['Pets', '🐾'], ['Kids', '🧸'], ['Gas', '⛽'], ['Personal', '💅'], ['Gifts', '🎁'], ['Medical', '🩺'], ['Eating out', '🍔']];
 const welcoming = () => !!(H() && H().welcomeBy && H().welcomeBy === me());
 
 function viewWelcome() {
   S.wz = S.wz || { step: 0 };
+  S.wz.other = S.wz.other || [];
+  S.wz.back = S.wz.back || [];
   const st = S.wz.step;
   const h = H();
   const sv = h.savings || {};
@@ -1545,6 +1547,12 @@ function viewWelcome() {
       </div>
       <label class="field"><span class="label">Cushion to keep in checking</span><input data-ch="goal" data-f="buffer" inputmode="decimal" value="${esc(checkingBuffer())}"></label>
       <p class="small muted">Each month, anything above the cushion can move to savings.${bucketsOn() ? ' Set up your buckets anytime from the Year tab → Savings right now.' : ''}</p>`;
+  } else if (st === 5) {
+    const list = (kind, label) => (S.wz[kind].length ? S.wz[kind].map(o => `<div class="line"><span>${esc(o.name)}</span><span><b>${money(o.amount)}</b> <button class="x small" data-act="wz-x-del" data-kind="${kind}" data-id="${esc(o.id)}" aria-label="Remove">×</button></span></div>`).join('') : `<p class="muted small">${label}</p>`)
+      + `<div class="add-row"><input id="wz-${kind}-name" placeholder="${kind === 'other' ? 'e.g. Credit card payment' : 'e.g. Refund'}"><input id="wz-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="wz-x-add" data-kind="${kind}">Add</button></div>`;
+    body = `<h2>Anything else this month?</h2><p class="muted">One-time things for ${D.name(ym)} that aren’t a regular bill or budget. Only add what hasn’t happened yet — anything already in your checking balance is covered. Skip this if there’s nothing.</p>
+      <h3>Other expenses still to pay</h3><p class="small muted">A credit card payment, a trip, a birthday gift…</p>${list('other', 'None')}
+      <h3>Money still coming in</h3><p class="small muted">A refund, money someone owes you, extra pay…</p>${list('back', 'None')}`;
   } else {
     body = `<h2>Let’s start ${D.name(ym)}</h2><p class="muted">What does your checking account show right now?</p>
       <label class="amount move-amt"><span>$</span><input id="wz-checking" inputmode="decimal" value="${esc(S.wz.checking || '')}" aria-label="Checking balance"></label>
@@ -1566,7 +1574,9 @@ async function finishWelcome(skipped) {
   if (!skipped && !(S.months[ym] && S.months[ym].setup)) {
     const amount = num(S.wz && S.wz.checking);
     const M = {
-      setup: true, setupAt: Date.now(), bills: preBills((S.wz && S.wz.pre) || {}, ym), other: [], back: [], moved: null,
+      setup: true, setupAt: Date.now(), bills: preBills((S.wz && S.wz.pre) || {}, ym), moved: null,
+      other: ((S.wz && S.wz.other) || []).map(o => ({ ...o, paid: false })),
+      back: ((S.wz && S.wz.back) || []).map(o => ({ ...o, received: false })),
       budgets: Object.fromEntries(H().categories.map(c => [c.id, Number(c.budget) || 0])),
       held: (H().helpers || []).map(x => ({ ...x, received: false })),
       checking: { amount: amount === null ? 0 : amount, at: Date.now() },
@@ -2545,6 +2555,16 @@ const acts = {
   'd-finish': el => finishSetup(el.dataset.mode),
   'wz-next': () => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.step++; window.scrollTo(0, 0); render(true); },
   'wz-back': () => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.step--; window.scrollTo(0, 0); render(true); },
+  'wz-x-add': el => {
+    const k = el.dataset.kind;
+    const name = $(`#wz-${k}-name`).value.trim();
+    const amount = num($(`#wz-${k}-amt`).value);
+    if (!name || !amount) { toast('Add a name and an amount'); return; }
+    S.wz[k].push({ id: newId(), name, amount: Math.abs(amount) });
+    $(`#wz-${k}-name`).value = ''; $(`#wz-${k}-amt`).value = '';
+    render(true);
+  },
+  'wz-x-del': el => { const k = el.dataset.kind; S.wz[k] = S.wz[k].filter(o => o.id !== el.dataset.id); render(true); },
   'wz-track': async el => { await B.setH([[['trackMode'], el.dataset.v]]); },
   'wz-cat': async el => { await B.setH([[['categories'], [...H().categories, { id: newId(), name: el.dataset.n, emoji: el.dataset.e, budget: 0 }]]]); },
   'wz-finish': () => { S.wz.checking = $('#wz-checking').value; finishWelcome(false); },
