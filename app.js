@@ -851,6 +851,79 @@ function searchResultsHtml(q) {
 }
 function refreshSearch() { const box = $('#pq-results'); if (box) box.innerHTML = S.pq ? searchResultsHtml(S.pq) : ''; }
 
+// Category colors: a fixed muted palette (styles.css --pie-N, softened in dark
+// mode), picked by the category's place in the list so a category keeps its
+// color month to month. Uncategorized / old categories are grey.
+const PIE_N = 10;
+function catColor(key) {
+  const i = (H().categories || []).findIndex(c => c.id === key);
+  return i < 0 ? 'var(--pie-none)' : `var(--pie-${i % PIE_N})`;
+}
+
+// Donut of this month's category spending. Big slices hold their emoji (white)
+// inside; small ones get a thin line out to a colored dot with the emoji.
+// Tap a slice (or its dot) → the same category sheet as the rows below.
+function donutHtml(items, total) {
+  const R = 96, r = 60, mid = (R + r) / 2, LR = 128, gap = 0.035;
+  const pt = (rad, a) => [rad * Math.sin(a), -rad * Math.cos(a)];
+  const f = n => n.toFixed(2);
+  const arc = (a0, a1) => {
+    const big = a1 - a0 > Math.PI ? 1 : 0;
+    const [x0, y0] = pt(R, a0), [x1, y1] = pt(R, a1), [x2, y2] = pt(r, a1), [x3, y3] = pt(r, a0);
+    return `M${f(x0)} ${f(y0)}A${R} ${R} 0 ${big} 1 ${f(x1)} ${f(y1)}L${f(x2)} ${f(y2)}A${r} ${r} 0 ${big} 0 ${f(x3)} ${f(y3)}Z`;
+  };
+  const pos = (x, y) => `left:${f((x + 150) / 3)}%;top:${f((y + 150) / 3)}%`;
+  const slices = items.filter(i => i.amt > 0.004);
+  const sum = slices.reduce((a, i) => a + i.amt, 0);
+  const center = sum > 0
+    ? `<div class="donut-mid"><b>${money(total)}</b><span class="small muted">spent</span></div>`
+    : `<div class="donut-mid"><span class="small muted">Nothing logged yet</span></div>`;
+  if (!sum) return `<div class="donut"><svg viewBox="-150 -150 300 300" aria-hidden="true"><circle r="${mid}" fill="none" stroke="rgba(var(--ink-rgb), .1)" stroke-width="${R - r}"/></svg>${center}</div>`;
+  let a = 0;
+  const segs = slices.map(i => {
+    const span = (i.amt / sum) * Math.PI * 2;
+    const s = { ...i, a0: a, a1: a + span, m: a + span / 2, span, color: catColor(i.key) };
+    a += span;
+    return s;
+  });
+  const emojiOf = s => { const c = catById(s.key); return c ? (c.emoji || '•') : '❔'; };
+  // Inside if the slice's arc at mid radius has room for an emoji
+  segs.forEach(s => { s.inside = segs.length === 1 || s.span * mid >= 30; s.la = s.m; });
+  // Spread outside dots apart so neighbors don't overlap
+  const out = segs.filter(s => !s.inside);
+  const minGap = 26 / LR;
+  for (let pass = 0; pass < 40; pass++) {
+    let moved = false;
+    for (let k = 1; k < out.length; k++) {
+      const d = out[k].la - out[k - 1].la;
+      if (d < minGap) { const push = (minGap - d) / 2; out[k - 1].la -= push; out[k].la += push; moved = true; }
+    }
+    if (out.length > 1) { // wrap-around: last vs first
+      const d = out[0].la + Math.PI * 2 - out[out.length - 1].la;
+      if (d < minGap) { const push = (minGap - d) / 2; out[0].la += push; out[out.length - 1].la -= push; moved = true; }
+    }
+    if (!moved) break;
+  }
+  const paths = segs.map(s => {
+    const label = `${catById(s.key) ? catById(s.key).name : 'Uncategorized'}: ${money(s.amt)}`;
+    const d = segs.length === 1
+      ? `M0 ${-R}A${R} ${R} 0 1 1 0 ${R}A${R} ${R} 0 1 1 0 ${-R}ZM0 ${-r}A${r} ${r} 0 1 0 0 ${r}A${r} ${r} 0 1 0 0 ${-r}Z`
+      : arc(s.a0 + Math.min(gap, s.span / 4) / 2, s.a1 - Math.min(gap, s.span / 4) / 2);
+    const [dx, dy] = pt(5, s.m);
+    return `<path class="slice" d="${d}" fill-rule="evenodd" style="fill:${s.color};--dx:${f(dx)}px;--dy:${f(dy)}px" data-act="bd-item" data-key="${esc(s.key)}" role="button" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title></path>`;
+  }).join('');
+  const lines = out.map(s => {
+    const [x0, y0] = pt(R + 3, s.m), [x1, y1] = pt(LR - 11, s.la);
+    return `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" style="stroke:${s.color}" stroke-width="1.5" stroke-linecap="round"/>`;
+  }).join('');
+  const labels = segs.map(s => {
+    if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in" style="${pos(x, y)}">${esc(emojiOf(s))}</span>`; }
+    const [x, y] = pt(LR, s.la);
+    return `<button class="donut-emo out" style="${pos(x, y)};background:${s.color}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}"><span>${esc(emojiOf(s))}</span></button>`;
+  }).join('');
+  return `<div class="donut"><svg viewBox="-150 -150 300 300">${lines}${paths}</svg>${labels}${center}</div>`;
+}
+
 function viewBreakdown() {
   const ym = S.bdYm || homeYm();
   setTimeout(() => ensureLoaded(ym).catch(e => console.warn('older purchases', e)), 0);
@@ -876,12 +949,13 @@ function viewBreakdown() {
   <div class="psearch"><input id="pq" type="search" placeholder="🔍 Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
   <div id="pq-results">${S.pq ? searchResultsHtml(S.pq) : ''}</div>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
+  ${tab === 'cat' ? donutHtml(items, s.total) : ''}
   <section class="card">
-    <div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>
+    ${tab === 'cat' ? '' : `<div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>`}
     <div class="seg">${[['cat', 'Categories'], ['store', 'Stores'], ['tag', 'Tags']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="bd-tab" data-v="${k}">${l}</button>`).join('')}</div>
     ${items.length ? items.map(i => `<button class="bd-row" data-act="bd-item" data-key="${esc(i.key)}">
-        <span class="row between"><span>${esc(i.name)}</span><span><b>${money(i.amt)}</b>${i.budget !== undefined ? ` <span class="small muted">of ${money(i.budget)}</span>` : ''}</span></span>
-        <span class="bar thin"><i style="width:${(i.amt / max) * 100}%"></i></span>
+        <span class="row between"><span>${tab === 'cat' ? `<i class="cat-dot" style="background:${catColor(i.key)}"></i>` : ''}${esc(i.name)}</span><span><b>${money(i.amt)}</b>${i.budget !== undefined ? ` <span class="small muted">of ${money(i.budget)}</span>` : ''}</span></span>
+        <span class="bar thin"><i style="width:${(i.amt / max) * 100}%${tab === 'cat' ? `;background:${catColor(i.key)}` : ''}"></i></span>
         <span class="small muted">${counts(i.key)} purchase${counts(i.key) === 1 ? '' : 's'} · see past months ›</span>
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
   </section>

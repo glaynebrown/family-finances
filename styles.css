@@ -566,3 +566,27 @@ button.menu-row { display: flex; }
 }
 :root[data-theme="dark"] .pill { background: rgba(255, 255, 255, .9); }
 .setup-icon.planned i { position: absolute; right: 2px; bottom: 2px; font-style: normal; font-size: .62rem; font-weight: 900; background: var(--good); color: #fff; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; }
+
+/* Breakdown donut — muted category colors (dark mode softens them a touch) */
+:root {
+  --pie-0: #8FAE8B; --pie-1: #7E9CB8; --pie-2: #C98B6B; --pie-3: #A88AA6; --pie-4: #CDB282;
+  --pie-5: #6FA3A0; --pie-6: #C99197; --pie-7: #A3A46E; --pie-8: #9A97B8; --pie-9: #B87D5E;
+  --pie-none: #B5ADA6;
+}
+:root[data-theme="dark"] {
+  --pie-0: #86A582; --pie-1: #7894AE; --pie-2: #BE8466; --pie-3: #A086A0; --pie-4: #C2A97C;
+  --pie-5: #6A9A97; --pie-6: #BE8B91; --pie-7: #9A9B6A; --pie-8: #9390AF; --pie-9: #AE775A;
+  --pie-none: #6E6761;
+}
+.donut { position: relative; width: min(100%, 300px); aspect-ratio: 1; margin: -14px auto -4px; }
+.donut svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.donut .slice { cursor: pointer; transition: transform .18s ease; outline: none; }
+.donut .slice:hover, .donut .slice:focus-visible, .donut .slice:active { transform: translate(var(--dx), var(--dy)); }
+.donut-emo { position: absolute; transform: translate(-50%, -50%); line-height: 1; font-size: 1.25rem; }
+.donut-emo.in { pointer-events: none; filter: brightness(0) invert(1); }
+.donut-emo.out { width: 26px; height: 26px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; font-size: .85rem; cursor: pointer; }
+.donut-emo.out span { filter: brightness(0) invert(1); }
+.donut-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; }
+.donut-mid b { font-family: var(--hfont), sans-serif; font-size: 1.6rem; line-height: 1.1; }
+.donut-mid .small { max-width: 90px; }
+.cat-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
