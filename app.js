@@ -325,10 +325,63 @@ function catCard(c) {
     ? `<button class="val-edit over-txt" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</button>`
     : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
   const tapAct = H().trackMode === 'import' ? 'cat-list' : 'log';
+  // Covers this month: "Covered $45 from Home" on the one that went over,
+  // "$45 went to Food" on the one it came from. Tap × to undo.
+  const covers = ((S.months[homeYm()] || {}).covers || []).filter(x => x.to === c.id || x.from === c.id);
+  const nameOf = id => (catById(id) || {}).name || 'an old category';
+  const notes = covers.map(x => `<div class="small muted cover-note">${x.to === c.id ? `Covered ${money(x.amount)} from ${esc(nameOf(x.from))}` : `${money(x.amount)} went to ${esc(nameOf(x.to))}`} <button class="linkish small" data-act="cover-undo" data-id="${esc(x.id)}" aria-label="Undo">undo</button></div>`).join('');
   return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="${tapAct}" data-cat="${esc(c.id)}">
     <div class="row between"><span class="cat-name">${catBadge(c.id, 30)}${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
+    ${c.over ? `<div class="cover-row"><button class="btn ghost small" data-act="cover" data-cat="${esc(c.id)}">Cover it ›</button></div>` : ''}${notes}
   </div>`;
+}
+
+// "Cover it": move budget from other categories (this month only) to one that
+// went over. S.cover = { cat, need, amt: {catId: $} }.
+function coverCats() {
+  const ym = homeYm();
+  return Calc.checklist(H(), S.months[ym], ym, S.purchases).cats;
+}
+function openCover(catId) {
+  const c = coverCats().find(x => x.id === catId);
+  if (!c || !c.over) return;
+  S.cover = { cat: catId, need: round2(c.used - c.budget), amt: {} };
+  S.sheet = 'cover';
+  openSheet(coverHtml());
+}
+function coverTotal() { return round2(Object.values(S.cover.amt).reduce((a, v) => a + (Number(v) || 0), 0)); }
+function coverBad() {
+  const cats = coverCats();
+  return Object.entries(S.cover.amt).some(([id, v]) => v > ((cats.find(x => x.id === id) || {}).left || 0) + 0.004) || coverTotal() > S.cover.need + 0.004;
+}
+function coverSumHtml() {
+  const left = round2(S.cover.need - coverTotal());
+  if (coverBad()) return `<div class="alloc-sum over"><b>Too much</b> <span>${coverTotal() > S.cover.need + 0.004 ? `only ${money(S.cover.need)} is needed` : 'more than a category has left'}</span></div>`;
+  if (Math.abs(left) <= 0.004) return `<div class="alloc-sum ok"><b>${money(0)}</b> <span>All covered ✓</span></div>`;
+  return `<div class="alloc-sum left"><b>${money(left)}</b> <span>${coverTotal() > 0 ? 'still from Savings/Excess' : 'still to cover'}</span></div>`;
+}
+function coverSaveLabel() {
+  const t = coverTotal();
+  return t <= 0.004 ? 'Cover' : t < S.cover.need - 0.004 ? `Cover ${money(t)} (rest from Savings/Excess)` : `Cover ${money(t)}`;
+}
+function coverHtml() {
+  const C = S.cover;
+  const c = catById(C.cat);
+  const others = coverCats().filter(x => x.id !== C.cat && x.left > 0.004);
+  return `<div class="sheet-head alloc-head"><h2>Cover ${money(C.need)}</h2><button class="x" data-act="close" aria-label="Close">×</button>
+      <div id="cover-sum" class="alloc-pin">${coverSumHtml()}</div></div>
+    <p class="small muted">${esc(c ? c.name : '')} went over. Take it from what's left in another category — just for ${D.name(homeYm())}. Tap a name to fill it in.</p>
+    ${others.length ? others.map(x => `<div class="line alloc-line"><button class="linkish cover-pick" data-act="cover-fill" data-id="${esc(x.id)}">${catLabel(x)} <span class="small muted">${money(x.left)} left</span></button>
+      <input class="mini" data-ch="cover" data-id="${esc(x.id)}" inputmode="decimal" placeholder="$" value="${C.amt[x.id] ? C.amt[x.id] : ''}"></div>`).join('')
+      : '<p class="muted">No other category has money left this month, so this comes out of Savings/Excess.</p>'}
+    <div class="row between sheet-foot"><button class="linkish small" data-act="close">Leave it — comes out of Savings/Excess</button>
+      ${others.length ? `<button class="btn" id="cover-save" data-act="cover-save" ${coverTotal() <= 0.004 || coverBad() ? 'disabled' : ''}>${coverSaveLabel()}</button>` : ''}</div>`;
+}
+function redrawCover() { const y = $('#sheet').scrollTop; $('#sheet').innerHTML = coverHtml(); $('#sheet').scrollTop = y; }
+function refreshCoverSum() {
+  const sum = $('#cover-sum'); if (sum) sum.innerHTML = coverSumHtml();
+  const btn = $('#cover-save'); if (btn) { btn.textContent = coverSaveLabel(); btn.disabled = coverTotal() <= 0.004 || coverBad(); }
 }
 
 function purchaseRow(p, showPart = true) {
@@ -3008,6 +3061,49 @@ const acts = {
     inp.focus();
     inp.select();
   },
+  cover: el => openCover(el.dataset.cat),
+  'cover-fill': el => {
+    const C = S.cover;
+    const x = coverCats().find(k => k.id === el.dataset.id);
+    if (!x) return;
+    delete C.amt[x.id];
+    const rest = round2(C.need - coverTotal());
+    if (rest > 0.004) C.amt[x.id] = round2(Math.min(rest, x.left));
+    redrawCover();
+  },
+  'cover-save': async () => {
+    const C = S.cover;
+    if (!C || coverBad() || coverTotal() <= 0.004) return;
+    const total = coverTotal();
+    const ym = homeYm();
+    const cats = coverCats();
+    const bud = id => (cats.find(x => x.id === id) || {}).budget || 0;
+    const budgets = { [C.cat]: round2(bud(C.cat) + total) };
+    const covers = [...((S.months[ym] || {}).covers || [])];
+    for (const [id, v] of Object.entries(C.amt)) {
+      if (!(v > 0.004)) continue;
+      budgets[id] = round2(bud(id) - v);
+      covers.push({ id: newId(), to: C.cat, from: id, amount: round2(v), at: Date.now() });
+    }
+    closeSheet();
+    S.cover = null;
+    await B.setMonth(ym, { budgets });
+    await B.setMonthField(ym, ['covers'], covers);
+    toast(`Covered ${money(total)} for ${(catById(C.cat) || {}).name || 'that category'}`);
+  },
+  'cover-undo': async el => {
+    const ym = homeYm();
+    const M = S.months[ym] || {};
+    const x = (M.covers || []).find(k => k.id === el.dataset.id);
+    if (!x) return;
+    const cats = coverCats();
+    const bud = id => (cats.find(k => k.id === id) || {}).budget || 0;
+    const budgets = { [x.to]: round2(bud(x.to) - x.amount) };
+    if (catById(x.from)) budgets[x.from] = round2(bud(x.from) + x.amount);
+    await B.setMonth(ym, { budgets });
+    await B.setMonthField(ym, ['covers'], (M.covers || []).filter(k => k.id !== x.id));
+    toast(`Undid: ${money(x.amount)} back to ${(catById(x.from) || {}).name || 'that category'}`);
+  },
   'budget-edit': el => {
     const cat = el.dataset.cat;
     const ym = homeYm();
@@ -3400,6 +3496,7 @@ const changes = {
     rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
+  cover: el => { if (S.cover) { S.cover.amt[el.dataset.id] = Math.abs(num(el.value) || 0); refreshCoverSum(); } },
   alloc: el => { S.alloc.amt[el.dataset.id] = Math.abs(num(el.value) || 0); redrawAlloc(); },
   'alloc-one': el => {
     if (!el.value) return;
@@ -3447,6 +3544,10 @@ document.addEventListener('input', e => {
     const sum = $('#alloc-sum'); if (sum) sum.innerHTML = allocSumHtml();
     const btn = $('#alloc-save');
     if (btn) { btn.textContent = allocSaveLabel(); btn.disabled = S.alloc.amount < 0 && Math.abs(allocLeft()) > 0.004; }
+  }
+  if (e.target.matches('[data-ch="cover"]') && S.cover) {
+    S.cover.amt[e.target.dataset.id] = Math.abs(num(e.target.value) || 0);
+    refreshCoverSum();
   }
   if (e.target.id === 'pq') {
     S.pq = e.target.value.trim();
