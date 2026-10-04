@@ -482,3 +482,42 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .tour-dots { margin: 0; flex: 1; max-width: 50%; }
 .menu-row { width: 100%; border: 0; text-align: left; font: inherit; cursor: pointer; }
 button.menu-row { display: flex; }
+
+/* Habits */
+.home-hero .setup-icon { right: auto; left: 0; }
+.habits-cal .month-nav { margin: 0 0 8px; }
+.hab-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 12px; }
+.hab-stats.one { grid-template-columns: 1fr; }
+.hab-tile { border-radius: 14px; padding: 12px 10px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.hab-tile b { font-family: var(--hfont), var(--bfont), sans-serif; font-size: 2.2rem; line-height: 1; display: flex; align-items: center; gap: 4px; }
+.hab-tile b i { font-style: normal; font-size: 1.4rem; }
+.hab-tile span { font-size: .85rem; color: var(--muted); font-weight: 700; }
+.hab-tile.free { background: color-mix(in srgb, var(--good) 13%, transparent); }
+.hab-tile.free b { color: var(--good); }
+.hab-tile.streak { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.hab-tile.streak b { color: var(--over); }
+.hab-goal { margin: 0 0 6px; }
+.hab-goal .row { margin-bottom: 4px; }
+.hab-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; margin: 10px 0 6px; }
+.hab-day { aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; font-size: .85rem; color: var(--muted); }
+.hab-day.free { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); font-weight: 800; }
+.hab-day.spent { background: rgba(43, 37, 34, .07); }
+.hab-day.unknown { border: 1.5px dashed var(--line); }
+.hab-day.future { opacity: .45; }
+.hab-day.today { box-shadow: inset 0 0 0 2px var(--accent); }
+.tracker .row > span:first-child { display: flex; flex-direction: column; }
+.trk-n { display: flex; flex-direction: column; align-items: flex-end; }
+.trk-n b { font-family: var(--hfont), var(--bfont), sans-serif; font-size: 1.6rem; line-height: 1.1; }
+.hab-add { display: flex; gap: 6px; }
+.hab-add select { flex: 0 0 34%; }
+/* Habits goals */
+.section-head-row { display: flex; align-items: center; justify-content: space-between; margin: 22px 4px 10px; }
+.section-head-row .section-title { margin: 0; }
+.add-goal { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); font-size: 1.4rem; font-weight: 800; line-height: 1; cursor: pointer; }
+.card.goal { display: block; width: 100%; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.card.goal .bar { margin-top: 8px; }
+.goal-types { flex-wrap: nowrap; }
+.goal-types button { white-space: nowrap; flex: 1 1 auto; padding: 8px 6px; font-size: .88rem; }
+.card.goal { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform .15s; }
+.card.goal.dragging { transition: none; position: relative; z-index: 5; box-shadow: 0 12px 30px rgba(60, 40, 20, .25); }
+.goal-menu { margin-top: 16px; }

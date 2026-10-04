@@ -90,6 +90,7 @@ function seedHousehold(uid, name) {
     plans: {},
     usual: {},
     trackMode: 'log',
+    setupRemind: 'last3', // when the "Set up next month" banner shows (older households: last Friday)
     imports: {},
     rules: {},
     features: { buckets: false, overview: true },
@@ -274,12 +275,12 @@ const Calc = (() => {
     };
   }
 
-  // The month shown on Home: this month -- or next month once it's set up and
-  // this one isn't (so October shows up on September 30th).
+  // The month shown on Home: this month -- or next month as soon as it's set up
+  // (month-end setup moves you on: October shows up once you set it up on Sept 26).
   function homeMonth(months) {
     const cur = D.curYm();
     const next = D.addMonths(cur, 1);
-    if (!(months[cur] && months[cur].setup) && months[next] && months[next].setup) return next;
+    if (months[next] && months[next].setup) return next;
     return cur;
   }
 

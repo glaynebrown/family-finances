@@ -2,7 +2,7 @@
    drawn from plain HTML strings, and taps are handled by one delegated
    listener keyed on data-act (clicks) and data-ch (input changes).
 
-   Screens (hash routes): #/review  #/home ($: budgets + bills)  #/year
+   Screens (hash routes): #/habits (📊 → #/breakdown)  #/home ($: budgets + bills)  #/year
                           #/setup (from Review)  #/settings (gear on Home) */
 
 const B = Store.configured ? Store : Demo;
@@ -32,6 +32,8 @@ const feat = k => ((H() && H().features) || {})[k];
 const checkingBuffer = () => { const b = ((H() && H().savings) || {}).buffer; return b === undefined || b === null ? 500 : Number(b) || 0; };
 const bucketsOn = () => !!feat('buckets');
 const overviewOn = () => feat('overview') !== false;
+const habitsOn = () => feat('habits') !== false;
+const onByDefault = k => (k === 'overview' ? overviewOn() : k === 'habits' ? habitsOn() : !!feat(k));
 const payInChecking = () => !!feat('payInChecking');
 
 
@@ -152,6 +154,9 @@ function confetti() {
 const icons = {
   home: '<svg viewBox="0 0 24 24"><path d="M12 3.5v17M16.5 7.5c-.6-1.6-2.4-2.5-4.5-2.5-2.6 0-4.5 1.4-4.5 3.4 0 4.6 9.3 2.4 9.3 7.2 0 2-2 3.4-4.8 3.4-2.3 0-4.2-1-4.8-2.8"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  habits: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 9.5h16M8.5 3v4M15.5 3v4M8.5 14.5l2 2 4-4"/></svg>',
+  chart: '<svg viewBox="0 0 24 24"><path d="M5 20V12M10 20V6M15 20v-9M20 20V9"/><circle cx="17.5" cy="5.5" r="2.5"/><path d="m19.3 7.3 1.9 1.9"/></svg>',
+  setup: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M8.5 10l1.5 1.5L13 8.5M8.5 15.5h7"/></svg>',
   review: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M8 10.5h5M10.5 8v5"/></svg>',
   bills: '<svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="m8.5 9 1.5 1.5L13 7.5M8.5 15h7"/></svg>',
   year: '<svg viewBox="0 0 24 24"><path d="M5 20V11M10 20V6M15 20v-7M20 20V9"/></svg>',
@@ -209,7 +214,7 @@ function applyLook() {
 
 /* ---------- routing & rendering ---------- */
 
-const OLD_ROUTES = { bills: 'home', more: 'home', breakdown: 'review' };
+const OLD_ROUTES = { bills: 'home', more: 'home', review: 'habits' };
 const route = () => { const r = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home'; return OLD_ROUTES[r] || r; };
 
 function render(force) {
@@ -223,8 +228,9 @@ function render(force) {
   S.pending = false;
   if (!H()) return;
   applyLook();
-  const r = welcoming() ? 'welcome' : route();
-  const screens = { welcome: viewWelcome, home: viewHome, year: viewYear, review: viewReview, setup: viewSetup, newyear: viewNewYear, settings: viewSettings, import: viewImport, savings: viewSavings };
+  let r = welcoming() ? 'welcome' : route();
+  if (r === 'habits' && !habitsOn()) r = 'breakdown';
+  const screens = { welcome: viewWelcome, home: viewHome, year: viewYear, habits: viewHabits, breakdown: viewBreakdown, setup: viewSetup, newyear: viewNewYear, settings: viewSettings, import: viewImport, savings: viewSavings };
   const fn = screens[r] || viewHome;
   const y = window.scrollY;
   // Keep anything typed in "add" boxes (and which one had focus) across a redraw.
@@ -241,7 +247,7 @@ function render(force) {
   if (r !== 'welcome' && !S.tour && !S.tourAsked && ((H().people || {})[me()] || {}).tourPending) { S.tourAsked = true; setTimeout(startTour, 700); }
   if (S.tour) setTimeout(tourDraw, 50);
   const fab = $('#fab');
-  fab.hidden = !['home', 'review'].includes(r);
+  fab.hidden = !['home', 'habits', 'breakdown'].includes(r);
   // The tour's Log/Import stop shows both buttons, whatever this household picked.
   const tourBoth = S.tour && S.tour.steps[S.tour.i].showBoth;
   const importing = H().trackMode === 'import' && !tourBoth;
@@ -283,8 +289,8 @@ document.addEventListener('focusout', e => {
 function drawTabs(r) {
   const t = $('#tabs');
   t.hidden = false;
-  const on = id => (r === id || (id === 'home' && (r === 'settings' || r === 'import')) || (id === 'year' && r === 'savings') || (id === 'review' && (r === 'setup' || r === 'newyear')) ? 'on' : '');
-  t.innerHTML = `<a href="#/review" class="${on('review')}">${icons.review}<span>Review</span></a>`
+  const on = id => (r === id || (id === 'home' && ['settings', 'import', 'setup', 'newyear'].includes(r)) || (id === 'year' && r === 'savings') || (id === 'habits' && r === 'breakdown') ? 'on' : '');
+  t.innerHTML = (habitsOn() ? `<a href="#/habits" class="${on('habits')}">${icons.habits}<span>Habits</span></a>` : `<a href="#/breakdown" class="${on('breakdown')}">${icons.chart}<span>Breakdown</span></a>`)
     + `<a href="#/home" class="money ${on('home')}" aria-label="Home">${icons.home}</a>`
     + `<a href="#/year" class="${on('year')}">${icons.year}<span>Year</span></a>`;
 }
@@ -334,11 +340,15 @@ function viewHome() {
   const totalU = c.cats.reduce((s, x) => s + x.used, 0);
   const pct = totalB ? Math.min(100, (totalU / totalB) * 100) : 0;
   const overs = c.cats.filter(x => x.over);
+  const prompt = S.tour && S.tour.steps[S.tour.i].showSetup ? { kind: 'icon', ym: nextSetupYm() } : setupPrompt();
   return `
   <header class="hero home-hero">
     <a class="gear" href="#/settings" aria-label="Settings">${icons.gear}</a>
+    ${prompt && (prompt.kind === 'icon' || prompt.kind === 'banner') ? `<a class="gear setup-icon" href="#/setup" aria-label="Set up ${D.name(prompt.ym)}">${icons.setup}</a>` : ''}
     <h1>${D.name(ym)}</h1>
   </header>
+  ${newYearCard()}
+  ${prompt && prompt.kind === 'banner' ? `<a class="card setup-link setup-banner" href="#/setup"><span class="grow"><b>Set up ${D.name(prompt.ym)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>` : ''}
   ${M && M.setup ? '' : `<div class="card note-card"><p><b>${D.name(ym)} isn’t set up yet.</b> You can still log purchases — they’ll count against your normal budgets.</p><a class="btn" href="#/setup">Set up ${D.name(ym)}</a></div>`}
   ${overviewOn() ? `<div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
@@ -357,7 +367,7 @@ function uncatCard(spent) {
   if (!list.length) return '';
   const total = list.reduce((a, p) => a + p.part, 0);
   return `<section class="card uncat-card"><div class="row between"><h2>Uncategorized</h2><b>${money(total)}</b></div>
-    <p class="small muted">Tap one to pick a category. Anything left here comes up in monthly review.</p>
+    <p class="small muted">Tap one to pick a category. Until then, these are taken from Savings/Excess.</p>
     ${list.map(p => purchaseRow(p)).join('')}</section>`;
 }
 
@@ -790,6 +800,7 @@ function readMove(key) {
 function newYearCard() {
   const m = D.monthNum(D.curYm());
   if (m !== 12 && m !== 1) return '';
+  if (m === 12 && new Date().getDate() < setupRemindDay(D.curYm())) return '';
   const Y = nyYear();
   if ((H().nyDone || {})[Y]) return '';
   return `<a class="card setup-link ny-link" href="#/newyear"><span class="grow"><b>Set up ${Y}</b><span class="small muted">${bucketsOn() ? 'Savings recap' : 'Savings recap & HYSA'}, then budgets, bills, income and one-time money for the year</span></span><i>›</i></a>`;
@@ -828,7 +839,7 @@ function searchResultsHtml(q) {
 }
 function refreshSearch() { const box = $('#pq-results'); if (box) box.innerHTML = S.pq ? searchResultsHtml(S.pq) : ''; }
 
-function viewReview() {
+function viewBreakdown() {
   const ym = S.bdYm || homeYm();
   setTimeout(() => ensureLoaded(ym).catch(e => console.warn('older purchases', e)), 0);
   const s = Calc.spent(S.purchases, ym);
@@ -849,11 +860,7 @@ function viewReview() {
   items.sort((a, b) => b.amt - a.amt);
   const max = Math.max(1, ...items.map(i => i.amt));
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
-  const n = nextSetupYm();
-  return `<header class="hero small-hero"><h1>Review</h1></header>
-  ${newYearCard()}
-  <a class="card setup-link" href="#/setup"><span class="grow"><b>Set up ${D.name(n)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>
-  <h2 class="section-title">Breakdown</h2>
+  return `<header class="hero small-hero">${habitsOn() ? '<a class="back" href="#/habits">‹ Habits</a>' : ''}<h1>Breakdown</h1></header>
   <div class="psearch"><input id="pq" type="search" placeholder="🔍 Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
   <div id="pq-results">${S.pq ? searchResultsHtml(S.pq) : ''}</div>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
@@ -1431,7 +1438,7 @@ function viewSetup() {
   }
   return `<header class="hero small-hero"><h1>Set up ${D.name(N)}</h1>${d.redo ? '<div class="hero-sub">Already set up — this will redo it</div>' : ''}</header>
     ${steps}<section class="card setup">${body}</section>
-    <div class="row between">${d.step > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/review" data-act="d-cancel">Cancel</a>'}
+    <div class="row between">${d.step > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/home" data-act="d-cancel">Cancel</a>'}
       ${d.step < STEPS.length - 1 ? `<button class="btn" data-act="d-next">Next: ${STEPS[d.step + 1]}</button>` : ''}</div>`;
 }
 
@@ -1590,6 +1597,178 @@ async function finishWelcome(skipped) {
   if (!skipped) { confetti(); toast('You’re all set 🎉'); }
 }
 
+/* ---------- Habits (no-spend days, streaks, trackers) ---------- */
+
+// What counts as "spending" for habits: chosen categories and tags (bills never count).
+// Default: Activities, Home, and anything tagged/categorized Eating out.
+function habitCfg() {
+  const h = H();
+  const hb = h.habits || {};
+  const cats = hb.cats || h.categories.filter(c => /activit|^home/i.test(c.name) || /eating out/i.test(c.name)).map(c => c.id);
+  const tags = hb.tags || (h.tags || []).filter(t => /eating out/i.test(t));
+  return { cats, tags, goal: Number(hb.goal) || 0, streakGoal: Number(hb.streakGoal) || 0, trackers: hb.trackers || [], order: hb.order || [] };
+}
+const habitCounts = (p, cfg) => (Number(p.amount) || 0) > 0 && (cfg.cats.includes(p.cat) || (p.tags || []).some(t => cfg.tags.includes(t)));
+// Days we can't know yet: import-only households, after the last import.
+const habitKnown = day => H().trackMode !== 'import' || ((H().imports || {}).through || '') >= day;
+
+function habitDays(ym, cfg) {
+  const today = D.today();
+  const start = H().created ? D.dayStr(new Date(H().created)) : '';
+  const spentOn = new Set(S.purchases.filter(p => habitCounts(p, cfg)).map(p => p.date));
+  return Array.from({ length: D.daysIn(ym) }, (_, i) => {
+    const day = `${ym}-${D.pad(i + 1)}`;
+    // Before the household started (or in the future): nothing to show yet.
+    const st = day > today || day < start ? 'future' : !habitKnown(day) ? 'unknown' : spentOn.has(day) ? 'spent' : 'free';
+    return { day, n: i + 1, st };
+  });
+}
+// No-spend days in a row, counting back from today (today counts if nothing yet).
+function habitStreak(match) {
+  const start = H().created ? D.dayStr(new Date(H().created)) : '2000-01-01';
+  const spentOn = new Set(S.purchases.filter(match).map(p => p.date));
+  let n = 0;
+  let t = new Date(`${D.today()}T12:00`);
+  for (;;) {
+    const day = D.dayStr(t);
+    if (day < start || !habitKnown(day) || spentOn.has(day)) break;
+    n++;
+    t = new Date(t.getTime() - 864e5);
+    if (n > 3660) break;
+  }
+  return n;
+}
+function trackerMatch(tr) {
+  const v = String(tr.v || '').toLowerCase();
+  if (tr.kind === 'tag') return p => (Number(p.amount) || 0) > 0 && (p.tags || []).some(t => t.toLowerCase() === v);
+  if (tr.kind === 'cat') return p => (Number(p.amount) || 0) > 0 && p.cat === tr.v;
+  return p => (Number(p.amount) || 0) > 0 && String(p.store || '').toLowerCase().includes(v);
+}
+
+function viewHabits() {
+  setTimeout(() => loadAllPurchases().then(() => { if (route() === 'habits' && !S.habitsLoaded) { S.habitsLoaded = true; render(); } }).catch(e => console.warn('habits', e)), 0);
+  const cfg = habitCfg();
+  const ym = S.habYm || D.curYm();
+  const days = habitDays(ym, cfg);
+  const free = days.filter(d => d.st === 'free').length;
+  const streak = habitStreak(p => habitCounts(p, cfg));
+  const blanks = new Date(D.yearOf(ym), D.monthNum(ym) - 1, 1).getDay();
+  const isNow = ym === D.curYm();
+  const goal = cfg.goal;
+  const hit = goal && free >= goal;
+  return `<header class="hero small-hero"><h1>Habits</h1><a class="gear bd-icon" href="#/breakdown" aria-label="Breakdown and search">${icons.chart}</a></header>
+  <section class="card habits-cal">
+    <div class="row between month-nav"><button class="nav" data-act="hab-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="hab-m" data-d="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>
+    <div class="hab-stats ${isNow ? '' : 'one'}">
+      <div class="hab-tile free"><b>${free}</b><span>no-spend day${free === 1 ? '' : 's'}</span></div>
+      ${isNow ? `<div class="hab-tile streak"><b>${streak}${streak >= 3 ? '<i>🔥</i>' : ''}</b><span>day streak</span></div>` : ''}
+    </div>
+    <div class="hab-grid">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(x => `<span class="dp-dow">${x}</span>`).join('')}${'<span></span>'.repeat(blanks)}${days.map(d => `<span class="hab-day ${d.st} ${d.day === D.today() ? 'today' : ''}" title="${d.day}">${d.st === 'unknown' ? '?' : d.n}</span>`).join('')}</div>
+    ${H().trackMode === 'import' ? '<p class="small muted">“?” days come in with your next import.</p>' : ''}
+  </section>
+  <div class="section-head-row"><h2 class="section-title">Goals</h2><button class="add-goal" data-act="goal-add" aria-label="Add a goal">+</button></div>
+  ${goalCards(cfg, free, streak, isNow)}`;
+}
+
+// Goal cards: monthly no-spend days, days in a row, and "No ___" streaks. Tap one to edit or remove it.
+function goalCards(cfg, free, streak, isNow) {
+  const bar = (n, of) => `<div class="bar"><i style="width:${Math.min(100, (n / of) * 100)}%"></i></div>`;
+  const cards = [];
+  if (cfg.goal) cards.push(`<button class="card goal" data-key="goal" data-act="goal-edit" data-k="goal"><div class="row between"><b>📅 ${cfg.goal} no-spend days a month</b><span class="small ${free >= cfg.goal ? 'save-good' : 'muted'}">${free >= cfg.goal ? 'Reached! 🎉' : `${free} of ${cfg.goal}`}</span></div>${bar(free, cfg.goal)}</button>`);
+  if (cfg.streakGoal && isNow) cards.push(`<button class="card goal" data-key="streakGoal" data-act="goal-edit" data-k="streakGoal"><div class="row between"><b>🔥 ${cfg.streakGoal} days in a row</b><span class="small ${streak >= cfg.streakGoal ? 'save-good' : 'muted'}">${streak >= cfg.streakGoal ? 'Reached! 🎉' : `${streak} of ${cfg.streakGoal}`}</span></div>${bar(streak, cfg.streakGoal)}</button>`);
+  for (const tr of cfg.trackers) {
+    const m = trackerMatch(tr);
+    const last = S.purchases.filter(m).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const n = habitStreak(m);
+    cards.push(`<button class="card goal tracker" data-key="trk:${esc(tr.id)}" data-act="goal-edit" data-k="trk" data-id="${esc(tr.id)}"><div class="row between"><span><b>${esc(tr.emoji || '✨')} ${esc(tr.name)}</b><span class="small muted">${last ? `Last: ${D.niceDay(last.date)} · ${money(last.amount)}` : 'Nothing yet'}</span></span><span class="trk-n"><b>${n}</b><span class="small muted">day${n === 1 ? '' : 's'}</span></span></div></button>`);
+  }
+  // Your own order (press and hold a goal to drag it); new goals go to the end.
+  const pos = html => { const k = html.match(/data-key="([^"]+)"/)[1]; const i = cfg.order.indexOf(k); return i < 0 ? 999 : i; };
+  cards.sort((a, b) => pos(a) - pos(b));
+  return cards.join('') || '<p class="muted small center">Tap + to add a goal — like 10 no-spend days a month, 5 days in a row, or “No eating out”.</p>';
+}
+
+async function saveHabits(patch) {
+  const c = habitCfg();
+  const next = { cats: c.cats, tags: c.tags, goal: c.goal, streakGoal: c.streakGoal, trackers: c.trackers, order: c.order, ...patch };
+  await B.setH([[['habits'], next]]);
+}
+
+function openGoalAdd() {
+  S.gadd = S.gadd || { type: 'month' };
+  S.sheet = 'goal';
+  openSheet(goalAddHtml());
+}
+function goalAddHtml() {
+  const g = S.gadd;
+  const cfg = habitCfg();
+  const types = [['month', 'Per month'], ['streak', 'In a row'], ['avoid', 'Avoid something']];
+  let body = '';
+  if (g.type === 'month') body = `<label class="field"><span class="label">How many no-spend days each month?</span><input id="g-n" inputmode="numeric" value="${cfg.goal || ''}" placeholder="e.g. 10"></label>`;
+  else if (g.type === 'streak') body = `<label class="field"><span class="label">How many no-spend days in a row?</span><input id="g-n" inputmode="numeric" value="${cfg.streakGoal || ''}" placeholder="e.g. 5"></label>`;
+  else body = `<div class="field"><span class="label">What do you want to go without?</span>
+      <div class="hab-add"><select id="hab-kind"><option value="tag">Tag</option><option value="store">Store</option><option value="cat">Category</option></select>
+      <input id="hab-v" placeholder="e.g. Eating out, Amazon" list="hab-v-list"><datalist id="hab-v-list">${[...(H().tags || []), ...(H().stores || []), ...H().categories.map(x => x.name)].map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
+      <p class="small muted">Counts the days since you last bought it — like “No eating out: 12 days”.</p></div>`;
+  return `<div class="sheet-head"><h2>Add a goal</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+    <div class="seg goal-types">${types.map(([k, l]) => `<button type="button" class="${g.type === k ? 'on' : ''}" data-act="goal-type" data-v="${k}">${l}</button>`).join('')}</div>
+    ${body}
+    <div class="row end sheet-foot"><button class="btn" data-act="goal-save">Add goal</button></div>
+    <button class="card menu-row goal-menu" data-act="hab-settings"><span><b>What counts as spending</b><span class="small muted">The categories and tags that break a no-spend day</span></span><span class="chev">›</span></button>`;
+}
+function openGoalEdit(el) {
+  const cfg = habitCfg();
+  const k = el.dataset.k;
+  const tr = k === 'trk' ? cfg.trackers.find(t => t.id === el.dataset.id) : null;
+  S.gedit = { k, id: el.dataset.id };
+  S.sheet = 'goal';
+  openSheet(`<div class="sheet-head"><h2>${tr ? `${esc(tr.emoji || '✨')} ${esc(tr.name)}` : k === 'goal' ? 'No-spend days a month' : 'Days in a row'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+    ${tr ? `<p class="muted">Counting the days since you last bought ${tr.kind === 'cat' ? `anything in ${esc((catById(tr.v) || {}).name || '')}` : esc(tr.v)}.</p>`
+      : `<label class="field"><span class="label">${k === 'goal' ? 'No-spend days each month' : 'No-spend days in a row'}</span><input id="g-n" inputmode="numeric" value="${cfg[k] || ''}"></label>`}
+    <div class="row between sheet-foot"><button class="btn ghost danger" data-act="goal-del">Remove goal</button>${tr ? '' : '<button class="btn" data-act="goal-update">Save</button>'}</div>`);
+}
+
+function openHabitSettings() {
+  const cfg = habitCfg();
+  S.hab = JSON.parse(JSON.stringify(cfg));
+  S.sheet = 'hab';
+  openSheet(habitSheetHtml());
+}
+function habitSheetHtml() {
+  const c = S.hab;
+  const chip = (act, v, on, label) => `<button type="button" class="chip ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${label}</button>`;
+  return `<div class="sheet-head"><h2>What counts as spending</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+    <div class="field"><span class="label">What counts as spending?</span><p class="small muted">Green days on the calendar = nothing bought in these. Bills never count.</p>
+      <div class="chips">${H().categories.map(x => chip('hab-cat', x.id, c.cats.includes(x.id), `${esc(x.emoji || '')} ${esc(x.name)}`)).join('')}</div>
+      <p class="small muted" style="margin-top:8px">Tags</p><div class="chips">${(H().tags || []).map(t => chip('hab-tag', t, c.tags.includes(t), esc(t))).join('') || '<span class="small muted">No tags yet</span>'}</div></div>
+    <div class="row end sheet-foot"><button class="btn" data-act="hab-save">Save</button></div>`;
+}
+function redrawHab() { const y = $('#sheet').scrollTop; $('#sheet').innerHTML = habitSheetHtml(); $('#sheet').scrollTop = y; }
+
+/* ---------- Month-end setup reminder ($ page) ---------- */
+
+// When "Set up next month" shows: the last week as a small icon; from the reminder day
+// (last Friday by default for older households, last 3 days for new ones) as a banner.
+function setupRemindDay(ym) {
+  const mode = H().setupRemind || 'friday';
+  const last = D.daysIn(ym);
+  if (mode === 'last3') return last - 2;
+  if (mode === 'friday') { for (let d = last; d > 0; d--) if (new Date(D.yearOf(ym), D.monthNum(ym) - 1, d).getDay() === 5) return d; }
+  const n = Number(mode);
+  return n >= 1 ? Math.min(n, last) : last - 2;
+}
+function setupPrompt() {
+  const cur = D.curYm();
+  const next = D.addMonths(cur, 1);
+  if (S.months[next] && S.months[next].setup) return null;
+  if (!(S.months[cur] && S.months[cur].setup)) return null; // set up this month first (its own card shows)
+  const day = new Date().getDate();
+  const last = D.daysIn(cur);
+  if (day >= setupRemindDay(cur)) return { kind: 'banner', ym: next };
+  if (day > last - 7) return { kind: 'icon', ym: next };
+  return null;
+}
+
 /* ---------- App tour ("How does it work?") ----------
    Dims the screen, spotlights one thing at a time with a short note, and moves
    between pages by itself. Shows once for each new person (after first-time
@@ -1607,8 +1786,9 @@ function tourSteps() {
   st.push(
     { route: 'home', page: 'budgets', sel: '.spend-sum', title: 'Budgets', text: 'How much is left to spend this month, with a card for each category below. Tap a card to log or see its purchases.' },
     { route: 'home', page: 'budgets', sel: ['#fab', '#fab2'], showBoth: true, title: 'Tracking spending: Log or Import', text: '+ Log: add a purchase right after you buy it (you can split one receipt across categories). Import: download your bank’s transactions as a CSV file weekly (or as often as you like) and the app sorts them for you. Or do both — anything you already logged is matched, never counted twice. Choose in Settings → Setup.' },
-    { route: 'review', sel: '.setup-link', title: 'Set up next month', text: 'Do this at the end of the month, when you’re ready to move on to the next one. It walks through your checking balance, bills, budgets, paychecks and what moves to savings. Anything you planned on the Year tab (income, OT, one-time expenses) fills in automatically — you can still change it.' },
-    { route: 'review', sel: '.psearch', title: 'Breakdown & search', text: 'See where the money went by category, store or tag — and search any purchase ever.' },
+    { route: 'home', sel: '.setup-icon', showSetup: true, title: 'Set up next month', text: 'In the last week of the month this icon shows up here, then a banner after your last payday (change when in Settings → Setup). Do this at the end of the month, when you’re ready to move on to the next one. It walks through your checking balance, bills, budgets, paychecks and what moves to savings. Anything you planned on the Year tab (income, OT, one-time expenses) fills in automatically — you can still change it.' },
+    ...(habitsOn() ? [{ route: 'habits', sel: '.habits-cal', title: 'Habits', text: 'Green days are no-spend days — nothing bought in the categories you pick (bills never count). Watch your streak, and tap + under Goals to aim for no-spend days, days in a row, or habits like “No eating out”.' }] : []),
+    habitsOn() ? { route: 'habits', sel: '.bd-icon', title: 'Breakdown & search', text: 'Tap here to see where the money went by category, store or tag — and search any purchase ever.' } : { route: 'breakdown', sel: '.psearch', title: 'Breakdown & search', text: 'Where the money went by category, store or tag — and search any purchase ever.' },
     { route: 'year', sel: '.months', title: 'Year', text: 'Your savings projected month by month. Tap a month to plan raises, overtime, Christmas or anything one-time.' },
     { route: 'home', sel: '.home-hero .gear', title: 'Settings', text: 'Categories, bills, income and everything else live here. Want this tour again? Settings → How does it work?' },
   );
@@ -1848,7 +2028,7 @@ function viewNewYear() {
   }
   return `<header class="hero small-hero"><h1>Set up ${Y}</h1></header>
     ${steps}<section class="card setup">${body}</section>
-    <div class="row between">${ny.step > 0 ? '<button class="btn ghost" data-act="ny-back">Back</button>' : '<a class="btn ghost" href="#/review" data-act="ny-cancel">Cancel</a>'}
+    <div class="row between">${ny.step > 0 ? '<button class="btn ghost" data-act="ny-back">Back</button>' : '<a class="btn ghost" href="#/home" data-act="ny-cancel">Cancel</a>'}
       ${ny.step < NY_STEPS.length - 1 ? `<button class="btn" data-act="ny-next">Next: ${NY_STEPS[ny.step + 1]}</button>` : ''}</div>`;
 }
 
@@ -2006,8 +2186,9 @@ function viewSettingsSetup() {
   <section class="card"><h2>Features</h2>
     ${[['buckets', 'Savings buckets', 'Give every savings dollar a job: buckets with goals, a % of each month’s extra, and spending history. Shows on the Year tab.'],
       ['overview', 'Overview page', 'Checking, bills and the live Savings/Excess on the $ page. Turn off to keep the $ page to just Budgets.'],
-      ['payInChecking', 'Paychecks land in checking', 'For paychecks that go straight into this checking account during the month (they’re for next month). Check each one off on Overview when it arrives so it’s set aside.']].map(([k, l, d]) => {
-      const on = k === 'overview' ? overviewOn() : !!feat(k);
+      ['payInChecking', 'Paychecks land in checking', 'For paychecks that go straight into this checking account during the month (they’re for next month). Check each one off on Overview when it arrives so it’s set aside.'],
+      ['habits', 'Habits page', 'No-spend days, streaks and habit trackers. Turn off to make the first tab Breakdown (where your money went, plus search).']].map(([k, l, d]) => {
+      const on = onByDefault(k);
       return `<div class="line feature"><span><b>${l}</b><span class="small muted">${d}</span></span><button class="switch ${on ? 'on' : ''}" data-act="feature" data-k="${k}" role="switch" aria-checked="${on}" aria-label="${l}"><i></i></button></div>`;
     }).join('')}
   </section>
@@ -2030,6 +2211,13 @@ function viewSettingsSetup() {
     <p class="small muted">When you set up a month, only the Savings/Excess above this is suggested for moving to savings.</p>
     ${(sv.log || []).length ? `<details class="small"><summary>Savings history</summary>${[...sv.log].reverse().slice(0, 40).map(l => `<div class="line small"><span>${new Date(l.t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(l.note || l.kind)}</span><span>${l.kind === 'set' && l.note === 'Starting balance' ? money(l.amount) : (l.amount >= 0 ? '+' : '') + money(l.amount)}</span></div>`).join('')}</details>` : ''}
   </section>
+  <section class="card"><h2>Month-end reminder</h2>
+    <p class="small muted">When “Set up next month” shows on the $ page as a banner (a small icon appears the last week of the month).</p>
+    <div class="seg">${[['friday', 'Last Friday'], ['last3', 'Last 3 days'], ['day', 'Pick a day']].map(([k, l]) => { const m = H().setupRemind || 'friday'; const on = k === 'day' ? /^\d+$/.test(m) : m === k; return `<button class="${on ? 'on' : ''}" data-act="remind" data-v="${k === 'day' ? (/^\d+$/.test(m) ? m : '25') : k}">${l}</button>`; }).join('')}</div>
+    ${/^\d+$/.test(H().setupRemind || '') ? `<label class="field"><span class="label">Starting on day</span><input data-ch="remind-day" inputmode="numeric" value="${esc(H().setupRemind)}"></label>` : ''}
+    <p class="small muted">This month: from ${D.name(D.curYm())} ${D.ordinal(setupRemindDay(D.curYm()))}.</p>
+  </section>
+
   <section class="card"><h2>Backup</h2>
     <p class="small muted">Download a copy of your data to keep in Files, iCloud or email.</p>
     <div class="stack"><button class="btn ghost full" data-act="export-csv">Download purchases (spreadsheet)</button>
@@ -2113,14 +2301,15 @@ function shrinkImage(file) {
   });
 }
 
-/* ---------- press-and-hold to reorder savings buckets ---------- */
+/* ---------- press-and-hold to reorder savings buckets and habit goals ---------- */
 
 (() => {
   let hold = null;
   const GAP = 10;
   const point = e => (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
   function begin(item, y) {
-    const items = [...item.parentElement.querySelectorAll('.bucket[data-id]')];
+    const sel = item.matches('.card.goal[data-key]') ? '.card.goal[data-key]' : '.bucket[data-id]';
+    const items = [...item.parentElement.querySelectorAll(sel)];
     const idx = items.indexOf(item);
     const h = item.getBoundingClientRect().height + GAP;
     S.drag = { item, items, idx, target: idx, startY: y, h };
@@ -2144,11 +2333,16 @@ function shrinkImage(file) {
     const d = S.drag;
     S.drag = null;
     d.items.forEach(el => { el.style.transform = ''; el.classList.remove('dragging'); });
-    // Swallow the click that follows the drop so the bucket doesn't open.
+    // Swallow the click that follows the drop so the bucket (or goal) doesn't open.
     const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
     document.addEventListener('click', stop, { capture: true, once: true });
     setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 400);
-    if (d.target !== d.idx) {
+    if (d.target !== d.idx && d.item.matches('.card.goal[data-key]')) {
+      const keys = d.items.map(el => el.dataset.key);
+      const [k] = keys.splice(d.idx, 1);
+      keys.splice(d.target, 0, k);
+      await saveHabits({ order: keys });
+    } else if (d.target !== d.idx) {
       const list = [...(H().buckets || [])];
       const [moved] = list.splice(d.idx, 1);
       list.splice(d.target, 0, moved);
@@ -2156,7 +2350,7 @@ function shrinkImage(file) {
     } else render();
   }
   function down(e) {
-    const item = e.target.closest('.bucket[data-id]');
+    const item = e.target.closest('.bucket[data-id], .card.goal[data-key]');
     if (!item || (e.button !== undefined && e.button > 0)) return;
     const p = point(e);
     hold = { x: p.clientX, y: p.clientY, timer: setTimeout(() => { begin(item, hold.y); }, 400) };
@@ -2224,6 +2418,41 @@ const acts = {
     toast('Deleted');
   },
 
+  'hab-m': el => { S.habYm = D.addMonths(S.habYm || D.curYm(), Number(el.dataset.d)); render(); },
+  'hab-settings': () => { if (sheetOpen()) { closeSheet(); setTimeout(openHabitSettings, 200); } else openHabitSettings(); },
+  'hab-cat': el => { const v = el.dataset.v; const c = S.hab; c.cats = c.cats.includes(v) ? c.cats.filter(x => x !== v) : [...c.cats, v]; redrawHab(); },
+  'hab-tag': el => { const v = el.dataset.v; const c = S.hab; c.tags = c.tags.includes(v) ? c.tags.filter(x => x !== v) : [...c.tags, v]; redrawHab(); },
+  'hab-save': async () => { const hb = S.hab; closeSheet(); await saveHabits({ cats: hb.cats, tags: hb.tags }); toast('Saved'); },
+  'goal-add': () => openGoalAdd(),
+  'goal-type': el => { S.gadd.type = el.dataset.v; $('#sheet').innerHTML = goalAddHtml(); },
+  'goal-save': async () => {
+    const g = S.gadd;
+    if (g.type === 'avoid') {
+      const kind = $('#hab-kind').value;
+      const raw = $('#hab-v').value.trim();
+      if (!raw) { toast('Type what to go without'); return; }
+      const cat = kind === 'cat' ? H().categories.find(x => x.name.toLowerCase() === raw.toLowerCase()) : null;
+      if (kind === 'cat' && !cat) { toast('Pick one of your categories'); return; }
+      const emoji = kind === 'cat' ? cat.emoji : /eat|food|restaurant/i.test(raw) ? '🍔' : /amazon|target|shop/i.test(raw) ? '🛍️' : /coffee|starbucks/i.test(raw) ? '☕' : '✨';
+      closeSheet();
+      await saveHabits({ trackers: [...habitCfg().trackers, { id: newId(), kind, v: cat ? cat.id : raw, name: `No ${cat ? cat.name : raw}`, emoji }] });
+    } else {
+      const n = Math.round(num($('#g-n').value) || 0);
+      if (n < 1) { toast('Type a number of days'); return; }
+      closeSheet();
+      await saveHabits(g.type === 'month' ? { goal: n } : { streakGoal: n });
+    }
+    toast('Goal added');
+  },
+  'goal-edit': el => openGoalEdit(el),
+  'goal-update': async () => { const n = Math.round(num($('#g-n').value) || 0); if (n < 1) { toast('Type a number of days'); return; } const k = S.gedit.k; closeSheet(); await saveHabits({ [k]: n }); },
+  'goal-del': async () => {
+    const { k, id } = S.gedit;
+    if (!(await ask('Remove this goal?', 'Remove'))) return;
+    closeSheet();
+    await saveHabits(k === 'trk' ? { trackers: habitCfg().trackers.filter(t => t.id !== id) } : { [k]: 0 });
+  },
+  'remind': async el => { await B.setH([[['setupRemind'], el.dataset.v]]); },
   'tour-start': () => startTour(),
   'tour-next': () => { S.tour.i++; tourGo(); },
   'tour-back': () => { S.tour.i--; tourGo(); },
@@ -2455,7 +2684,7 @@ const acts = {
   },
   feature: async el => {
     const k = el.dataset.k;
-    const on = !(k === 'overview' ? overviewOn() : feat(k));
+    const on = !onByDefault(k);
     await B.setH([[['features', k], on]]);
   },
   yr: el => { S.year = Math.max(firstYear(), (S.year || D.yearOf(homeYm())) + Number(el.dataset.d)); render(); },
@@ -2843,6 +3072,7 @@ const changes = {
   },
   usual: async el => { const v = num(el.value); await B.setH([[['usual', el.dataset.f], v === null ? B.DEL : v]]); },
   'wz-sav': async el => { const v = num(el.value); if (v !== null) await setSavings(v, 'Starting balance'); },
+  'remind-day': async el => { const n = Math.round(num(el.value) || 0); if (n >= 1 && n <= 31) await B.setH([[['setupRemind'], String(n)]]); },
   'ny-pick': el => { S.ny[el.dataset.f] = el.value; },
   goal: async el => { const v = num(el.value); if (v !== null) await B.setH([[['savings', el.dataset.f], v]]); },
   font: async el => { await B.setH([[['look', el.dataset.f], el.value]]); },
