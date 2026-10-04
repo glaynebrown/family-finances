@@ -521,3 +521,4 @@ button.menu-row { display: flex; }
 .card.goal { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform .15s; }
 .card.goal.dragging { transition: none; position: relative; z-index: 5; box-shadow: 0 12px 30px rgba(60, 40, 20, .25); }
 .goal-menu { margin-top: 16px; }
+.goal-cmp { margin: 6px 0 0; }

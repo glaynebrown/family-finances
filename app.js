@@ -1656,6 +1656,7 @@ function viewHabits() {
   const isNow = ym === D.curYm();
   const goal = cfg.goal;
   const hit = goal && free >= goal;
+  if (isNow && S.loadedFrom <= '2000-01-01') checkHabitWins(cfg, free, streak);
   return `<header class="hero small-hero"><h1>Habits</h1><a class="gear bd-icon" href="#/breakdown" aria-label="Breakdown and search">${icons.chart}</a></header>
   <section class="card habits-cal">
     <div class="row between month-nav"><button class="nav" data-act="hab-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="hab-m" data-d="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>
@@ -1670,17 +1671,75 @@ function viewHabits() {
   ${goalCards(cfg, free, streak, isNow)}`;
 }
 
+// Comparing with last month (for the lines under each goal).
+function monthStats(ym, cfg, upto) {
+  const days = habitDays(ym, cfg);
+  if (days.every(d => d.st === 'future')) return null; // before the household started
+  let free = 0; let best = 0; let run = 0;
+  for (const d of days) {
+    if (upto && d.n > upto) break;
+    if (d.st === 'free') { free++; run++; best = Math.max(best, run); } else run = 0;
+  }
+  return { free, best };
+}
+const timesIn = (match, ym) => S.purchases.filter(p => match(p) && D.ymOf(p.date) === ym).length;
+
+// Beat last month? Confetti + a "Good job!" note, once per goal per month (on this device).
+function celebrateOnce(key, title, text) {
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem('ne-cele')) || {}; } catch (e) {}
+  if (seen[key]) return;
+  seen[key] = 1;
+  try { localStorage.setItem('ne-cele', JSON.stringify(seen)); } catch (e) {}
+  // More than one win at once: show them one after another.
+  S.celeQ = (S.celeQ || []).concat({ title, text });
+  if (S.celeQ.length === 1) setTimeout(nextCelebration, 600);
+}
+async function nextCelebration() {
+  const c = S.celeQ[0];
+  if (!c) return;
+  confetti();
+  await ask(`<b>Good job! 🎉 ${c.title}</b><br>${c.text}`, 'Thanks!', 'Close');
+  S.celeQ.shift();
+  if (S.celeQ.length) setTimeout(nextCelebration, 400);
+}
+function checkHabitWins(cfg, free, streak) {
+  const cur = D.curYm();
+  const prev = D.addMonths(cur, -1);
+  const last = monthStats(prev, cfg);
+  if (last && cfg.goal && last.free >= 1 && free > last.free) celebrateOnce(`month:${cur}`, `You beat ${D.name(prev)}’s no-spend days!`, `${free} no-spend days so far — more than all of ${D.name(prev)} (${last.free}).`);
+  if (last && cfg.streakGoal && last.best >= 1 && streak > last.best) celebrateOnce(`streak:${cur}`, `You beat ${D.name(prev)}’s no-spend streak!`, `${streak} days in a row — longer than ${D.name(prev)}’s best (${last.best}).`);
+  // "Avoid" goals are judged once a month is over: fewer times than the month before.
+  const before = D.addMonths(prev, -1);
+  if (monthStats(before, cfg)) {
+    for (const tr of cfg.trackers) {
+      const m = trackerMatch(tr);
+      const a = timesIn(m, prev);
+      const b = timesIn(m, before);
+      if (a < b) celebrateOnce(`trk:${tr.id}:${prev}`, `You beat ${D.name(before)} on “${esc(tr.name)}”!`, `${esc(tr.name.replace(/^No /, ''))} only ${a} time${a === 1 ? '' : 's'} in ${D.name(prev)} — fewer than ${D.name(before)} (${b}).`);
+    }
+  }
+}
+
 // Goal cards: monthly no-spend days, days in a row, and "No ___" streaks. Tap one to edit or remove it.
 function goalCards(cfg, free, streak, isNow) {
   const bar = (n, of) => `<div class="bar"><i style="width:${Math.min(100, (n / of) * 100)}%"></i></div>`;
+  const prev = D.addMonths(D.curYm(), -1);
+  const pName = D.name(prev);
+  const dayNum = new Date().getDate();
+  const cmp = t => (t ? `<p class="small muted goal-cmp">${t}</p>` : '');
+  const lastTo = dayNum >= 3 ? monthStats(prev, cfg, dayNum) : null; // too early in the month to compare
+  const lastAll = monthStats(prev, cfg);
+  const monthLine = lastTo ? (free === lastTo.free ? `Even with ${pName} by this point` : `${Math.abs(free - lastTo.free)} ${free > lastTo.free ? 'ahead of' : 'behind'} ${pName} by this point`) : '';
+  const streakLine = lastAll && dayNum >= 3 ? `${pName}’s best: ${lastAll.best} in a row` : '';
   const cards = [];
-  if (cfg.goal) cards.push(`<button class="card goal" data-key="goal" data-act="goal-edit" data-k="goal"><div class="row between"><b>📅 ${cfg.goal} no-spend days a month</b><span class="small ${free >= cfg.goal ? 'save-good' : 'muted'}">${free >= cfg.goal ? 'Reached! 🎉' : `${free} of ${cfg.goal}`}</span></div>${bar(free, cfg.goal)}</button>`);
-  if (cfg.streakGoal && isNow) cards.push(`<button class="card goal" data-key="streakGoal" data-act="goal-edit" data-k="streakGoal"><div class="row between"><b>🔥 ${cfg.streakGoal} days in a row</b><span class="small ${streak >= cfg.streakGoal ? 'save-good' : 'muted'}">${streak >= cfg.streakGoal ? 'Reached! 🎉' : `${streak} of ${cfg.streakGoal}`}</span></div>${bar(streak, cfg.streakGoal)}</button>`);
+  if (cfg.goal) cards.push(`<button class="card goal" data-key="goal" data-act="goal-edit" data-k="goal"><div class="row between"><b>📅 ${cfg.goal} no-spend days a month</b><span class="small ${free >= cfg.goal ? 'save-good' : 'muted'}">${free >= cfg.goal ? 'Reached! 🎉' : `${free} of ${cfg.goal}`}</span></div>${bar(free, cfg.goal)}${cmp(monthLine)}</button>`);
+  if (cfg.streakGoal && isNow) cards.push(`<button class="card goal" data-key="streakGoal" data-act="goal-edit" data-k="streakGoal"><div class="row between"><b>🔥 ${cfg.streakGoal} days in a row</b><span class="small ${streak >= cfg.streakGoal ? 'save-good' : 'muted'}">${streak >= cfg.streakGoal ? 'Reached! 🎉' : `${streak} of ${cfg.streakGoal}`}</span></div>${bar(streak, cfg.streakGoal)}${cmp(streakLine)}</button>`);
   for (const tr of cfg.trackers) {
     const m = trackerMatch(tr);
     const last = S.purchases.filter(m).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     const n = habitStreak(m);
-    cards.push(`<button class="card goal tracker" data-key="trk:${esc(tr.id)}" data-act="goal-edit" data-k="trk" data-id="${esc(tr.id)}"><div class="row between"><span><b>${esc(tr.emoji || '✨')} ${esc(tr.name)}</b><span class="small muted">${last ? `Last: ${D.niceDay(last.date)} · ${money(last.amount)}` : 'Nothing yet'}</span></span><span class="trk-n"><b>${n}</b><span class="small muted">day${n === 1 ? '' : 's'}</span></span></div></button>`);
+    cards.push(`<button class="card goal tracker" data-key="trk:${esc(tr.id)}" data-act="goal-edit" data-k="trk" data-id="${esc(tr.id)}"><div class="row between"><span><b>${esc(tr.emoji || '✨')} ${esc(tr.name)}</b><span class="small muted">${last ? `Last: ${D.niceDay(last.date)} · ${money(last.amount)}` : 'Nothing yet'}</span></span><span class="trk-n"><b>${n}</b><span class="small muted">day${n === 1 ? '' : 's'}</span></span></div>${cmp(lastAll && dayNum >= 3 ? `${pName}: ${timesIn(m, prev)} time${timesIn(m, prev) === 1 ? '' : 's'}` : '')}</button>`);
   }
   // Your own order (press and hold a goal to drag it); new goals go to the end.
   const pos = html => { const k = html.match(/data-key="([^"]+)"/)[1]; const i = cfg.order.indexOf(k); return i < 0 ? 999 : i; };
