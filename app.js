@@ -2510,7 +2510,8 @@ function viewSettingsSetup() {
   const h = H();
   const sv = h.savings || {};
   setTimeout(() => loadAllPurchases().catch(e => console.warn('backup preload', e)), 0);
-  return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Setup</h1></header>
+  return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Setup</h1>
+    <a class="gear" href="#/settings/look" aria-label="Appearance">${icons.gallery}</a></header>
 
   <section class="card"><h2>You</h2>
     <label class="field"><span class="label">Your name</span><input data-ch="myname" value="${esc(myName())}"></label>
