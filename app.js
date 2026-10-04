@@ -934,12 +934,12 @@ function catIconKey(c) {
 }
 const catIconSvg = (key, size) => `<svg class="ci" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${CAT_ICONS[key] ? CAT_ICONS[key][1] : CAT_ICONS.tag[1]}</svg>`;
 // A category's symbol everywhere: its white line icon in a circle of its color,
-// or — if they typed their own emoji (c.customEmoji) — that emoji on a light
-// tint of the color.
+// or — if they typed their own emoji (c.customEmoji) — just that emoji, no
+// circle (the donut chart gives it a white circle of its own).
 function catBadge(key, size = 28) {
   const c = catById(key);
   const dim = `width:${size}px;height:${size}px`;
-  if (c && c.customEmoji) return `<span class="cat-badge emo" style="background:color-mix(in srgb, ${catColor(key)} 24%, var(--mix-base));${dim};font-size:${Math.round(size * 0.56)}px">${esc(c.customEmoji)}</span>`;
+  if (c && c.customEmoji) return `<span class="cat-badge emo" style="${dim};font-size:${Math.round(size * 0.78)}px">${esc(c.customEmoji)}</span>`;
   return `<span class="cat-badge" style="background:${catColor(key)};${dim}">${catIconSvg(catIconKey(c), Math.round(size * 0.58))}</span>`;
 }
 const catLabel = (c, size = 22) => `<span class="cat-lab">${catBadge(c.id, size)}<span>${esc(c.name)}</span></span>`;
@@ -1039,7 +1039,6 @@ function viewBreakdown() {
     }
   }
   items.sort((a, b) => b.amt - a.amt);
-  const max = Math.max(1, ...items.map(i => i.amt));
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
   return `<header class="hero small-hero">${habitsOn() ? '<a class="back" href="#/habits">‹ Habits</a>' : ''}<h1>Breakdown</h1></header>
   <div class="psearch"><input id="pq" type="search" placeholder="🔍 Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
@@ -1050,8 +1049,7 @@ function viewBreakdown() {
     ${tab === 'cat' ? '' : `<div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>`}
     <div class="seg">${[['cat', 'Categories'], ['store', 'Stores'], ['tag', 'Tags']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="bd-tab" data-v="${k}">${l}</button>`).join('')}</div>
     ${items.length ? items.map(i => `<button class="bd-row" data-act="bd-item" data-key="${esc(i.key)}">
-        <span class="row between"><span class="${tab === 'cat' ? 'cat-name' : ''}">${tab === 'cat' ? catBadge(i.key) : ''}${esc(i.name)}${tab === 'cat' && i.amt > 0 && s.total > 0 ? ` <span class="small muted pct">· ${Math.round((i.amt / s.total) * 100) || '<1'}%</span>` : ''}</span><b>${money(i.amt)}</b></span>
-        ${tab === 'cat' ? '' : `<span class="bar thin"><i style="width:${(i.amt / max) * 100}%"></i></span>`}
+        <span class="row between"><span class="cat-name">${tab === 'cat' ? catBadge(i.key) : ''}${esc(i.name)}${i.amt > 0 && s.total > 0 ? ` <span class="small muted pct">· ${Math.round((i.amt / s.total) * 100) || '<1'}%</span>` : ''}</span><b>${money(i.amt)}</b></span>
         <span class="small muted">${counts(i.key)} purchase${counts(i.key) === 1 ? '' : 's'} · see past months ›</span>
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
   </section>
