@@ -851,6 +851,90 @@ function searchResultsHtml(q) {
 }
 function refreshSearch() { const box = $('#pq-results'); if (box) box.innerHTML = S.pq ? searchResultsHtml(S.pq) : ''; }
 
+// Chart icons: simple white line icons for categories on the Breakdown page
+// (emojis turned white lose their detail). Each category gets one picked from
+// its emoji/name, or the one chosen in Settings → Categories (c.icon).
+const CAT_ICONS = {
+  cart: ['Groceries', '<circle cx="8" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h2.5l2.6 12a2 2 0 0 0 2 1.6h9a2 2 0 0 0 1.9-1.5L21.5 7H5.4"/>'],
+  utensils: ['Eating out', '<path d="M7 2v20M4 2v6a3 3 0 0 0 6 0V2"/><path d="M17 22V2c-2.5 1-4 3.5-4 7v4h4"/>'],
+  coffee: ['Coffee', '<path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 2.5v3M12 2.5v3"/>'],
+  house: ['Home', '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9"/>'],
+  paw: ['Pets', '<circle cx="5.5" cy="10" r="1.8"/><circle cx="9.3" cy="5.5" r="1.8"/><circle cx="14.7" cy="5.5" r="1.8"/><circle cx="18.5" cy="10" r="1.8"/><path d="M12 11.5c-2.5 0-5 3.3-5 6 0 1.8 1.3 2.8 3 2.8.8 0 1.4-.4 2-.4s1.2.4 2 .4c1.7 0 3-1 3-2.8 0-2.7-2.5-6-5-6z"/>'],
+  bottle: ['Baby & kids', '<path d="M10 2.5h4v3.5h-4z"/><path d="M9 6h6l1 3v10.5a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V9z"/><path d="M8 13h3M8 16.5h3"/>'],
+  balloon: ['Activities', '<path d="M12 15.5c-3.3 0-6-3-6-6.5S8.7 2.5 12 2.5s6 3 6 6.5-2.7 6.5-6 6.5z"/><path d="M11 17.5h2l-1-2z"/><path d="M12 17.5c0 2-1.5 2.5-.5 4"/>'],
+  fuel: ['Gas', '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M4 10h10"/><path d="M14 8h2a2 2 0 0 1 2 2v5.5a1.5 1.5 0 0 0 3 0V8l-3-3"/>'],
+  car: ['Car', '<path d="M5 17h14v-4.5l-2-5a1.5 1.5 0 0 0-1.4-1H8.4a1.5 1.5 0 0 0-1.4 1l-2 5z"/><path d="M5 12.5h14M5 17v2.5M19 17v2.5M8 15h.01M16 15h.01"/>'],
+  gift: ['Gifts', '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/><path d="M12 8v13"/><path d="M12 8C10.5 4 7 3.5 7 6c0 2 3 2 5 2s5 0 5-2c0-2.5-3.5-2-5 2"/>'],
+  cake: ['Birthday', '<path d="M4 21h16v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/><path d="M4 16c1.5 0 2-1 4-1s2.5 1 4 1 2.5-1 4-1 2.5 1 4 1"/><path d="M12 11V7M12 3.5v.01"/>'],
+  pill: ['Medical', '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7z"/><path d="m8.5 8.5 7 7"/>'],
+  heart: ['Heart', '<path d="M12 20.5 4.2 12.8a4.8 4.8 0 0 1 7.8-5.6 4.8 4.8 0 0 1 7.8 5.6z"/>'],
+  shield: ['Insurance', '<path d="M12 21s8-3.5 8-10V5l-8-3-8 3v6c0 6.5 8 10 8 10z"/>'],
+  shirt: ['Clothes', '<path d="M8 3 3 6l2 4 2.5-1V21h9V9l2.5 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z"/>'],
+  bag: ['Shopping', '<path d="M5 7h14l-1 14H6z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/>'],
+  sparkle: ['Self care', '<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/><path d="M19 16.5c.3 1.6 1 2.3 2.5 2.5-1.5.3-2.2 1-2.5 2.5-.3-1.5-1-2.2-2.5-2.5 1.5-.2 2.2-.9 2.5-2.5z"/>'],
+  scissors: ['Haircuts', '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>'],
+  dumbbell: ['Fitness', '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>'],
+  ball: ['Sports', '<circle cx="12" cy="12" r="9"/><path d="M12 3c2.5 2.5 3.8 5.5 3.8 9S14.5 18.5 12 21M12 3C9.5 5.5 8.2 8.5 8.2 12s1.3 6.5 3.8 9M3 12h18"/>'],
+  book: ['School & books', '<path d="M4 19.5V5a2 2 0 0 1 2-2h14v15H6a2 2 0 0 0-2 2 2 2 0 0 0 2 2h14"/>'],
+  plane: ['Travel', '<path d="M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5v5l-2.5 2V22l4-1 4 1v-1.5l-2.5-2v-5z"/>'],
+  tv: ['Streaming', '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="m8 2 4 4 4-4"/>'],
+  game: ['Games', '<rect x="2.5" y="7" width="19" height="11" rx="4"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 13.5h.01"/>'],
+  puzzle: ['Puzzles & toys', '<path d="M15.4 4.4a1 1 0 0 0 1.7-.5 2.5 2.5 0 1 1 3 3 1 1 0 0 0-.5 1.7l1.7 1.7a2.4 2.4 0 0 1 0 3.4l-1.7 1.7a1 1 0 0 1-1.7-.5 2.5 2.5 0 1 0-3 3 1 1 0 0 1 .5 1.7l-1.7 1.7a2.4 2.4 0 0 1-3.4 0l-1.7-1.7a1 1 0 0 0-1.7.5 2.5 2.5 0 1 1-3-3 1 1 0 0 0 .5-1.7l-1.7-1.7a2.4 2.4 0 0 1 0-3.4l1.7-1.7a1 1 0 0 1 1.7.5 2.5 2.5 0 1 0 3-3 1 1 0 0 1-.5-1.7l1.7-1.7a2.4 2.4 0 0 1 3.4 0z"/>'],
+  music: ['Music', '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>'],
+  phone: ['Phone', '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18h2"/>'],
+  bolt: ['Utilities', '<path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/>'],
+  wrench: ['Repairs', '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/>'],
+  plant: ['Garden', '<path d="M12 21v-9"/><path d="M12 12c0-4 3-7 8-7 0 5-3 7-8 7z"/><path d="M12 15c0-3-2.5-5.5-7-5.5 0 4 2.5 5.5 7 5.5z"/>'],
+  coin: ['Money', '<circle cx="12" cy="12" r="9"/><path d="M15 9.2c-.5-1-1.6-1.7-3-1.7-1.8 0-3 .9-3 2.2 0 3 6 1.5 6 4.5 0 1.3-1.3 2.3-3 2.3-1.5 0-2.7-.7-3.1-1.8M12 6v1.5M12 16.5V18"/>'],
+  tag: ['Other', '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.3"/>'],
+  star: ['Star', '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>'],
+  question: ['Not sorted', '<path d="M8.5 8.5a3.5 3.5 0 1 1 5 3.2c-.9.4-1.5 1.2-1.5 2.1v.7"/><path d="M12 19h.01"/>'],
+};
+// First match wins, tested against "emoji name"
+const CAT_ICON_MATCH = [
+  ['utensils', /🍔|🍕|🍽|🍴|🌮|🍟|🥡|eat(ing)? ?out|restaurant|dining|takeout|take-out|fast food/iu],
+  ['coffee', /☕|coffee|starbucks/iu],
+  ['cart', /🛒|🍎|🥦|🥕|food|grocer/iu],
+  ['puzzle', /🧩|🪀|puzzle|toy/iu],
+  ['bottle', /👶|🍼|🧸|twin|bab(y|ies)|kid|child|diaper|daycare/iu],
+  ['paw', /🐶|🐱|🐾|🐕|🐈|pet|dog|cat\b|vet/iu],
+  ['balloon', /🎈|🎉|🎪|activit|fun|party|outing/iu],
+  ['fuel', /⛽|\bgas\b|fuel/iu],
+  ['car', /🚗|🚙|car\b|auto|transport|parking|toll/iu],
+  ['cake', /🎂|🧁|birthday/iu],
+  ['gift', /🎁|🎄|gift|christmas|holiday/iu],
+  ['pill', /💊|🩺|🏥|🦷|medic|doctor|health|pharm|dental|copay/iu],
+  ['heart', /❤|💕|🙏|⛪|giv(e|ing)|church|tithe|donat|charit/iu],
+  ['shield', /🛡|insur/iu],
+  ['shirt', /👕|👗|👚|👖|cloth/iu],
+  ['bag', /🛍|shop|amazon|target/iu],
+  ['scissors', /✂|💇|hair/iu],
+  ['sparkle', /💅|✨|💄|beauty|self ?care|nail|makeup/iu],
+  ['dumbbell', /🏋|💪|gym|fitness|workout/iu],
+  ['ball', /⚽|🏀|⚾|🏈|sport/iu],
+  ['book', /📚|📖|🎓|✏|book|school|educat|class/iu],
+  ['plane', /✈|🏖|🧳|travel|vacation|trip/iu],
+  ['tv', /📺|🎬|🍿|stream|movie|netflix|tv\b|subscri/iu],
+  ['game', /🎮|🕹|game/iu],
+  ['music', /🎵|🎶|🎸|music/iu],
+  ['phone', /📱|phone/iu],
+  ['bolt', /⚡|💡|util|electric|power/iu],
+  ['wrench', /🔧|🛠|🔨|repair|mainten|tool/iu],
+  ['plant', /🌱|🪴|🌿|🌷|garden|plant|yard|lawn/iu],
+  ['coin', /💵|💰|💲|🐷|money|cash|saving/iu],
+  ['house', /🏠|🏡|🏘|home|house/iu],
+];
+function catIconKey(c) {
+  if (!c) return 'question';
+  if (c.icon && CAT_ICONS[c.icon]) return c.icon;
+  const s = `${c.emoji || ''} ${c.name || ''}`;
+  const hit = CAT_ICON_MATCH.find(([, re]) => re.test(s));
+  return hit ? hit[0] : 'tag';
+}
+const catIconSvg = (key, size) => `<svg class="ci" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${CAT_ICONS[key] ? CAT_ICONS[key][1] : CAT_ICONS.tag[1]}</svg>`;
+// Icon in a circle of the category's color (Breakdown rows, Settings)
+const catBadge = (key, size = 28) => `<span class="cat-badge" style="background:${catColor(key)};width:${size}px;height:${size}px">${catIconSvg(catIconKey(catById(key)), Math.round(size * 0.58))}</span>`;
+
 // Category colors: a fixed muted palette (styles.css --pie-N, softened in dark
 // mode), picked by the category's place in the list so a category keeps its
 // color month to month. Uncategorized / old categories are grey.
@@ -860,8 +944,8 @@ function catColor(key) {
   return i < 0 ? 'var(--pie-none)' : `var(--pie-${i % PIE_N})`;
 }
 
-// Donut of this month's category spending. Big slices hold their emoji (white)
-// inside; small ones get a thin line out to a colored dot with the emoji.
+// Donut of this month's category spending. Big slices hold their white line
+// icon inside; small ones get a thin line out to a colored dot with the icon.
 // Tap a slice (or its dot) → the same category sheet as the rows below.
 function donutHtml(items, total) {
   const R = 96, r = 60, mid = (R + r) / 2, LR = 128, gap = 0.035;
@@ -886,7 +970,7 @@ function donutHtml(items, total) {
     a += span;
     return s;
   });
-  const emojiOf = s => { const c = catById(s.key); return c ? (c.emoji || '•') : '❔'; };
+  const iconOf = (s, size) => catIconSvg(catIconKey(catById(s.key)), size);
   // Inside if the slice's arc at mid radius has room for an emoji
   segs.forEach(s => { s.inside = segs.length === 1 || s.span * mid >= 30; s.la = s.m; });
   // Spread outside dots apart so neighbors don't overlap
@@ -917,9 +1001,9 @@ function donutHtml(items, total) {
     return `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" style="stroke:${s.color}" stroke-width="1.5" stroke-linecap="round"/>`;
   }).join('');
   const labels = segs.map(s => {
-    if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in" style="${pos(x, y)}">${esc(emojiOf(s))}</span>`; }
+    if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in" style="${pos(x, y)}">${iconOf(s, 22)}</span>`; }
     const [x, y] = pt(LR, s.la);
-    return `<button class="donut-emo out" style="${pos(x, y)};background:${s.color}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}"><span>${esc(emojiOf(s))}</span></button>`;
+    return `<button class="donut-emo out" style="${pos(x, y)};background:${s.color}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}">${iconOf(s, 15)}</button>`;
   }).join('');
   return `<div class="donut"><svg viewBox="-150 -150 300 300">${lines}${paths}</svg>${labels}${center}</div>`;
 }
@@ -932,7 +1016,7 @@ function viewBreakdown() {
   const tab = S.bdTab;
   let items;
   if (tab === 'cat') {
-    items = (H().categories || []).map(c => ({ key: c.id, name: `${c.emoji || ''} ${c.name}`, amt: s.cat[c.id] || 0, budget: Calc.budgetFor(H(), M, c) }));
+    items = (H().categories || []).map(c => ({ key: c.id, name: c.name, amt: s.cat[c.id] || 0, budget: Calc.budgetFor(H(), M, c) }));
     for (const k in s.cat) if (!catById(k)) items.push({ key: k, name: k === 'uncat' ? 'Uncategorized' : 'Old category', amt: s.cat[k] });
   } else {
     const src = tab === 'store' ? s.store : s.tag;
@@ -954,7 +1038,7 @@ function viewBreakdown() {
     ${tab === 'cat' ? '' : `<div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>`}
     <div class="seg">${[['cat', 'Categories'], ['store', 'Stores'], ['tag', 'Tags']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="bd-tab" data-v="${k}">${l}</button>`).join('')}</div>
     ${items.length ? items.map(i => `<button class="bd-row" data-act="bd-item" data-key="${esc(i.key)}">
-        <span class="row between"><span>${tab === 'cat' ? `<i class="cat-dot" style="background:${catColor(i.key)}"></i>` : ''}${esc(i.name)}</span><span><b>${money(i.amt)}</b>${i.budget !== undefined ? ` <span class="small muted">of ${money(i.budget)}</span>` : ''}</span></span>
+        <span class="row between"><span class="${tab === 'cat' ? 'cat-name' : ''}">${tab === 'cat' ? catBadge(i.key) : ''}${esc(i.name)}</span><span><b>${money(i.amt)}</b>${i.budget !== undefined ? ` <span class="small muted">of ${money(i.budget)}</span>` : ''}</span></span>
         <span class="bar thin"><i style="width:${(i.amt / max) * 100}%${tab === 'cat' ? `;background:${catColor(i.key)}` : ''}"></i></span>
         <span class="small muted">${counts(i.key)} purchase${counts(i.key) === 1 ? '' : 's'} · see past months ›</span>
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
@@ -2321,6 +2405,7 @@ function catsEditHtml(intro = true) {
   const h = H();
   return `${intro ? '<p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>' : ''}
     ${h.categories.map((c, i) => `<div class="edit-row">
+      <button class="cat-ic-btn" data-act="cat-icon" data-id="${esc(c.id)}" aria-label="Chart icon for ${esc(c.name)}">${catBadge(c.id, 34)}</button>
       <input class="emoji-in" data-ch="cat" data-id="${esc(c.id)}" data-f="emoji" value="${esc(c.emoji || '')}" aria-label="Emoji">
       <input class="grow" data-ch="cat" data-id="${esc(c.id)}" data-f="name" value="${esc(c.name)}" aria-label="Name">
       <input class="mini" data-ch="cat" data-id="${esc(c.id)}" data-f="budget" inputmode="decimal" value="${esc(c.budget)}" aria-label="Budget">
@@ -3058,6 +3143,29 @@ const acts = {
     const c = catById(el.dataset.id);
     if (!(await ask(`Remove ${esc(c.name)}? Purchases already logged stay in your history.`, 'Remove'))) return;
     await B.setH([[['categories'], H().categories.filter(x => x.id !== c.id)]]);
+  },
+  'cat-icon': el => {
+    const c = catById(el.dataset.id);
+    if (!c) return;
+    const cur = c.icon && CAT_ICONS[c.icon] ? c.icon : '';
+    const auto = catIconKey({ ...c, icon: '' });
+    S.sheet = 'soft';
+    openSheet(`<div class="sheet-head"><h2>Chart icon</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+      <p class="small muted">Shows for ${esc(c.name)} in the Breakdown chart and list.</p>
+      <div class="icon-grid" style="--c:${catColor(c.id)}">
+        <button class="icon-pick ${cur ? '' : 'on'}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v=""><span class="cat-badge" style="background:var(--c)">${catIconSvg(auto, 20)}</span><span class="small">Automatic</span></button>
+        ${Object.keys(CAT_ICONS).filter(k => k !== 'question').map(k => `<button class="icon-pick ${cur === k ? 'on' : ''}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v="${k}"><span class="cat-badge" style="background:var(--c)">${catIconSvg(k, 20)}</span><span class="small">${esc(CAT_ICONS[k][0])}</span></button>`).join('')}
+      </div>`);
+  },
+  'cat-icon-pick': async el => {
+    const v = el.dataset.v;
+    const cats = H().categories.map(c => {
+      if (c.id !== el.dataset.id) return c;
+      const { icon, ...rest } = c;
+      return v ? { ...rest, icon: v } : rest;
+    });
+    closeSheet();
+    await B.setH([[['categories'], cats]]);
   },
   'cat-up': async el => {
     const cats = [...H().categories];
