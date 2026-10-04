@@ -3,7 +3,7 @@
    listener keyed on data-act (clicks) and data-ch (input changes).
 
    Screens (hash routes): #/habits (📊 → #/breakdown)  #/home ($: budgets + bills)  #/year
-                          #/setup (from Review)  #/settings (gear on Home) */
+                          #/setup/plan + #/setup/start (from the $ page)  #/settings (gear on Home) */
 
 const B = Store.configured ? Store : Demo;
 const S = {
@@ -353,16 +353,15 @@ function viewHome() {
   const totalU = c.cats.reduce((s, x) => s + x.used, 0);
   const pct = totalB ? Math.min(100, (totalU / totalB) * 100) : 0;
   const overs = c.cats.filter(x => x.over);
-  const prompt = S.tour && S.tour.steps[S.tour.i].showSetup ? { kind: 'icon', ym: nextSetupYm() } : setupPrompt();
+  const prompt = S.tour && S.tour.steps[S.tour.i].showSetup ? { kind: 'plan', ym: D.addMonths(D.curYm(), 1), banner: false } : setupPrompt();
   return `
   <header class="hero home-hero">
     <a class="gear" href="#/settings" aria-label="Settings">${icons.gear}</a>
-    ${prompt && (prompt.kind === 'icon' || prompt.kind === 'banner') ? `<a class="gear setup-icon" href="#/setup" aria-label="Set up ${D.name(prompt.ym)}">${icons.setup}</a>` : ''}
+    ${prompt ? `<a class="gear setup-icon ${prompt.planned ? 'planned' : ''}" href="#/setup/${prompt.kind}" aria-label="${prompt.kind === 'start' ? 'Start' : 'Plan'} ${D.name(prompt.ym)}">${icons.setup}${prompt.planned ? '<i>✓</i>' : ''}</a>` : ''}
     <h1>${D.name(ym)}</h1>
   </header>
   ${newYearCard()}
-  ${prompt && prompt.kind === 'banner' ? `<a class="card setup-link setup-banner" href="#/setup"><span class="grow"><b>Set up ${D.name(prompt.ym)}</b><span class="small muted">Your month-end checklist, step by step</span></span><i>›</i></a>` : ''}
-  ${M && M.setup ? '' : `<div class="card note-card"><p><b>${D.name(ym)} isn’t set up yet.</b> You can still log purchases — they’ll count against your normal budgets.</p><a class="btn" href="#/setup">Set up ${D.name(ym)}</a></div>`}
+  ${prompt && prompt.banner ? `<a class="card setup-link setup-banner" href="#/setup/${prompt.kind}"><span class="grow"><b>${prompt.kind === 'start' ? 'Start' : 'Plan'} ${D.name(prompt.ym)}</b><span class="small muted">${prompt.kind === 'plan' ? 'Budgets, bills and paychecks for next month' : `Close out ${D.name(D.addMonths(prompt.ym, -1))} and move your extra to savings`}</span></span><i>›</i></a>` : ''}
   ${overviewOn() ? `<div class="seg page-toggle" role="tablist">${[['overview', 'Overview'], ['budgets', 'Budgets']].map(([k, l]) => `<button role="tab" aria-selected="${S.page === k}" class="${S.page === k ? 'on' : ''}" data-act="page" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
@@ -1316,14 +1315,27 @@ async function saveImport() {
 
 const STEPS = ['Look back', 'Checking', 'Bills & extras', 'Budgets', 'Paychecks', 'Savings'];
 
-function startDraft() {
+// Two parts: "Plan" (last week of the month: bills & extras, budgets, paychecks —
+// nothing changes about the current month) and "Start" (evening of the last day or
+// later: look back, checking balance, last month's open items, what moves to savings).
+// Starting a month that was never planned includes the planning steps too.
+function startDraft(mode = 'start') {
   const N = nextSetupYm();
   const R = D.addMonths(N, -1);
   const MN = S.months[N];
   const MR = S.months[R] || {};
   const plan = (H().plans || {})[N] || {};
-  const d = { ym: N, step: 0, checking: '' };
-  if (MN && MN.setup) {
+  const d = { ym: N, step: 0, checking: '', mode };
+  // Last month's unfinished items only come in when the month actually starts.
+  const carriedOther = () => (mode === 'start' ? (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true })) : []);
+  const carriedBack = () => (mode === 'start' ? (MR.back || []).filter(b => !b.received).map(b => ({ ...b, carried: true })) : []);
+  if (MN && MN.planned && !MN.setup) {
+    d.planned = true;
+    d.other = carriedOther().concat((MN.other || []).map(o => ({ ...o })));
+    d.back = carriedBack().concat((MN.back || []).map(o => ({ ...o })));
+    d.held = (MN.held || []).map(o => ({ ...o }));
+    d.budgets = { ...(MN.budgets || {}) };
+  } else if (MN && MN.setup) {
     d.redo = true;
     d.other = (MN.other || []).map(o => ({ ...o }));
     d.back = (MN.back || []).map(o => ({ ...o }));
@@ -1331,9 +1343,8 @@ function startDraft() {
     d.budgets = { ...(MN.budgets || {}) };
     d.pre = Object.fromEntries(Object.entries(MN.bills || {}).filter(([, v]) => v && v.pre).map(([k]) => [k, true]));
   } else {
-    const carried = (MR.other || []).filter(o => !o.paid).map(o => ({ ...o, id: newId(), carried: true }));
-    d.other = carried.concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
-    d.back = (MR.back || []).filter(b => !b.received).map(b => ({ ...b, carried: true }));
+    d.other = carriedOther().concat((plan.other || []).map(o => ({ id: newId(), name: o.name, amount: o.amount, paid: false })));
+    d.back = carriedBack();
     for (const x of Calc.extras(plan)) if (Number(x.amount) > 0) d.back.push({ id: newId(), name: x.name, amount: Number(x.amount), received: false });
     d.held = (H().helpers || []).map(h => ({ ...h, received: false }));
     d.budgets = {};
@@ -1347,9 +1358,12 @@ function startDraft() {
     const e = Calc.earners(H())[0];
     const monthly = Number(plan[e.id]) || Number(Calc.usualFor(H(), e.id, N)) || 0;
     const half = round2(monthly / 2);
-    d.incoming = MN && MN.setup && MN.incoming ? MN.incoming.map(x => ({ ...x }))
+    d.incoming = MN && (MN.setup || MN.planned) && MN.incoming ? MN.incoming.map(x => ({ ...x }))
       : [{ id: newId(), name: 'Paycheck 1', amount: half, received: false }, { id: newId(), name: 'Paycheck 2', amount: round2(monthly - half), received: false }];
   }
+  d.seq = mode === 'plan' ? [2, 3, 4] : d.planned ? [0, 1, 2, 5] : [0, 1, 2, 3, 4, 5];
+  d.pos = 0;
+  d.step = d.seq[0];
   S.draft = d;
 }
 
@@ -1379,11 +1393,12 @@ function readDraftInputs() {
 }
 
 function viewSetup() {
-  if (!S.draft) startDraft();
+  const mode = location.hash.split('/')[2] === 'plan' ? 'plan' : 'start';
+  if (!S.draft || S.draft.mode !== mode) startDraft(mode);
   const d = S.draft;
   const N = d.ym;
   const R = D.addMonths(N, -1);
-  const steps = `<div class="steps">${STEPS.map((s, i) => `<span class="${i === d.step ? 'on' : i < d.step ? 'done' : ''}"></span>`).join('')}</div>`;
+  const steps = `<div class="steps">${d.seq.map((s, i) => `<span class="${i === d.pos ? 'on' : i < d.pos ? 'done' : ''}"></span>`).join('')}</div>`;
   let body = '';
   if (d.step === 0) {
     const c = Calc.checklist(H(), S.months[R], R, S.purchases);
@@ -1391,7 +1406,7 @@ function viewSetup() {
     const under = c.cats.filter(x => !x.over && x.used > 0);
     body = `<h2>How did ${D.name(R)} go?</h2>
       ${any ? c.cats.map(x => `<div class="line ${x.over ? 'over-line' : ''}"><span>${esc(x.emoji || '')} ${esc(x.name)} ${x.over ? `<span class="small over-txt">${calm() ? 'over by' : 'over'} ${money(x.used - x.budget)}</span>` : x.used > 0 ? `<span class="small good">${money(x.left)} under 🎉</span>` : ''}</span><b>${money(x.used)} <span class="small muted">/ ${money(x.budget)}</span></b></div>`).join('')
-        + `<p class="small muted">${c.cats.some(x => x.over) ? (calm() ? 'Anything over is just information — maybe that budget needs a little more room, or it was a one-off month.' : 'Categories over budget are highlighted.') : 'Everything stayed within budget. Nice work.'} <a href="#/review" data-act="bd-go" data-ym="${R}">See the breakdown ›</a></p>`
+        + `<p class="small muted">${c.cats.some(x => x.over) ? (calm() ? 'Anything over is just information — maybe that budget needs a little more room, or it was a one-off month.' : 'Categories over budget are highlighted.') : 'Everything stayed within budget. Nice work.'} <a href="#/breakdown" data-act="bd-go" data-ym="${R}">See the breakdown ›</a></p>`
         : `<p class="muted">Nothing was logged in the app for ${D.name(R)} — that’s fine, this is a fresh start.</p>`}
       `;
     if (under.length && calm() && !d.celebrated) { d.celebrated = true; setTimeout(confetti, 400); }
@@ -1400,11 +1415,13 @@ function viewSetup() {
     const est = Calc.checklist(H(), S.months[cur], cur, S.purchases).est;
     body = `<h2>Checking balance</h2><p class="muted">What does joint checking show right now?</p>
       <label class="amount"><span>$</span><input id="d-checking" inputmode="decimal" placeholder="${est}" value="${esc(d.checking)}"></label>
-      <p class="small muted">The app’s estimate is ${money(est)}. Additional income you’re still expecting gets added on the next step.</p>`;
+      <p class="small muted">The app’s estimate is ${money(est)}.</p>
+      ${(H().bills || []).some(b => D.dueTime(N, b.day) > Date.now()) ? `<h3>${D.name(N)} bills</h3><p class="small muted">Any already taken out of that balance (drafted early)? Tap “already came out” so they aren’t counted twice.</p>
+        ${(H().bills || []).filter(b => D.dueTime(N, b.day) > Date.now()).map(b => preBillRow(b, N, (d.pre || {})[b.id], 'd-pre')).join('')}` : ''}`;
   } else if (d.step === 2) {
     const bills = (H().bills || []).map(b => {
       const hs = d.held.filter(h => h.bill === b.id);
-      return preBillRow(b, N, (d.pre || {})[b.id], 'd-pre')
+      return `<div class="line"><span>${D.ordinal(b.day)} · ${esc(b.name)}</span><b>${money(Calc.billAmount(b, N))}</b></div>`
         + hs.map(h => `<div class="check-row share-row ${h.received ? 'done' : ''}"><button class="box ${h.received ? 'on' : ''}" data-act="d-toggle" data-kind="held" data-id="${esc(h.id)}" aria-label="Received">${h.received ? '✓' : ''}</button><span class="grow">${esc(h.name)}’s share <span class="small muted">${h.received ? 'in checking' : 'not in yet'}</span></span><input class="mini" id="d-h-${esc(h.id)}" inputmode="decimal" value="${esc(h.amount)}"></div>`).join('');
     }).join('');
     const row = (kind, flag) => o => `<div class="check-row ${o[flag] ? 'done' : ''}"><button class="box ${o[flag] ? 'on' : ''}" data-act="d-toggle" data-kind="${kind}" data-id="${esc(o.id)}">${o[flag] ? '✓' : ''}</button><span class="grow">${esc(o.name)}</span><b>${money(o.amount)}</b><button class="x small" data-act="d-del" data-kind="${kind}" data-id="${esc(o.id)}">×</button></div>`;
@@ -1417,8 +1434,8 @@ function viewSetup() {
     };
     const add = kind => `<div class="add-row"><input id="d-${kind}-name" placeholder="What"><input id="d-${kind}-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="d-add" data-kind="${kind}">Add</button></div>`;
     body = `<h2>Bills & extras for ${D.name(N)}</h2>
-      <h3>Automatic payments</h3>${bills}<p class="small muted">Already see a bill taken out of the balance you typed? Tap “already came out” so it isn’t counted twice. Check off shared payments that are already in. Change bills in Settings.</p>
-      <h3>Other expenses</h3><p class="small muted">One-time things this month. Check any that are already paid.</p>${rows('other', 'paid')}${add('other')}
+      <h3>Automatic payments</h3>${bills}<p class="small muted">${d.mode === 'plan' ? 'Change bills in Settings.' : 'Check off shared payments that are already in. Change bills in Settings.'}</p>
+      <h3>Other expenses</h3><p class="small muted">One-time things this month.${d.mode === 'plan' ? ` Anything still open from ${D.name(R)} gets added when you start ${D.name(N)}.` : ' Check any that are already paid.'}</p>${rows('other', 'paid')}${add('other')}
       <h3>Additional income</h3><p class="small muted">Refunds or extra money you’re expecting this month.</p>${rows('back', 'received')}${add('back')}`;
   } else if (d.step === 3) {
     body = `<h2>Budgets for ${D.name(N)}</h2><p class="muted">Start from your normal amounts. Trim any this month if things are tight — next month goes back to normal.</p>
@@ -1449,10 +1466,12 @@ function viewSetup() {
       <div class="line total-line ${c.excess < 0 ? 'neg' : ''}"><span>Savings/Excess</span><b>${money(c.excess)}</b></div>
       <div class="stack">${moveChoice(c.excess, d)}</div>`;
   }
-  return `<header class="hero small-hero"><h1>Set up ${D.name(N)}</h1>${d.redo ? '<div class="hero-sub">Already set up — this will redo it</div>' : ''}</header>
+  const last = d.pos === d.seq.length - 1;
+  return `<header class="hero small-hero"><h1>${d.mode === 'plan' ? 'Plan' : 'Start'} ${D.name(N)}</h1>${d.redo ? '<div class="hero-sub">Already started — this will redo it</div>' : d.mode === 'plan' ? `<div class="hero-sub">Nothing changes in ${D.name(R)} until you start ${D.name(N)}</div>` : ''}</header>
     ${steps}<section class="card setup">${body}</section>
-    <div class="row between">${d.step > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/home" data-act="d-cancel">Cancel</a>'}
-      ${d.step < STEPS.length - 1 ? `<button class="btn" data-act="d-next">Next: ${STEPS[d.step + 1]}</button>` : ''}</div>`;
+    <div class="row between">${d.pos > 0 ? '<button class="btn ghost" data-act="d-back">Back</button>' : '<a class="btn ghost" href="#/home" data-act="d-cancel">Cancel</a>'}
+      ${!last ? `<button class="btn" data-act="d-next">Next: ${STEPS[d.seq[d.pos + 1]]}</button>` : d.mode === 'plan' ? '<button class="btn" data-act="d-plan-save">Save plan</button>' : ''}</div>
+    ${last && d.mode === 'plan' ? `<p class="center"><button class="linkish small" data-act="d-plan-start">Save & start ${D.name(N)} now</button></p><p class="small muted center">Starting now ends ${D.name(R)} early — new purchases count toward ${D.name(N)}.</p>` : ''}`;
 }
 
 // A bill not due yet that already came out of checking (drafted early, or set up the night
@@ -1478,6 +1497,26 @@ function moveChoice(excess, d) {
   if (d.showMove) return `<p class="small muted">Change the amount to what you actually move.</p>${moveForm('setup', Math.max(0, excess))}${moveBtn('Finish & save transfer')}${finish('Finish — keep it all in checking', true)}`;
   return `<p class="small muted">${excess > 0.004 ? `Your ${money(excess)} excess is under your ${money(buf)} cushion — leave it in checking this month.` : 'Nothing extra to move this month.'}</p>
     ${finish('Finish')}${excess > 0.004 ? '<button class="linkish small" data-act="d-showmove">Move some anyway</button>' : ''}`;
+}
+
+// Save the plan for next month without starting it (the current month carries on as is).
+async function savePlanned(startNow) {
+  readDraftInputs();
+  const d = S.draft;
+  const N = d.ym;
+  const data = {
+    planned: true, plannedAt: Date.now(), budgets: d.budgets,
+    other: d.other.filter(o => !o.carried), back: d.back.filter(o => !o.carried), held: d.held,
+    ...(d.incoming ? { incoming: d.incoming } : {}),
+  };
+  await B.setMonth(N, data);
+  S.months[N] = { ...(S.months[N] || {}), ...data }; // so "start now" picks up the plan right away
+  const nv = x => (num(x) === null ? B.DEL : num(x));
+  await B.setH(Calc.earners(H()).map(e => [['plans', N, e.id], nv(d.pay[e.id])]));
+  S.draft = null;
+  if (startNow) { location.hash = '#/setup/start'; return; }
+  location.hash = '#/home';
+  toast(`${D.name(N)} is planned — you’ll start it the evening of ${D.name(D.addMonths(N, -1))} ${D.daysIn(D.addMonths(N, -1))}`);
 }
 
 async function finishSetup(mode) {
@@ -1757,7 +1796,7 @@ function goalCards(cfg, free, streak, isNow) {
   // Your own order (press and hold a goal to drag it); new goals go to the end.
   const pos = html => { const k = html.match(/data-key="([^"]+)"/)[1]; const i = cfg.order.indexOf(k); return i < 0 ? 999 : i; };
   cards.sort((a, b) => pos(a) - pos(b));
-  return cards.join('') || '<p class="muted small center">Tap + to add a goal — like 10 no-spend days a month, 5 days in a row, or “No eating out”.</p>';
+  return cards.join('');
 }
 
 async function saveHabits(patch) {
@@ -1778,10 +1817,15 @@ function goalAddHtml() {
   let body = '';
   if (g.type === 'month') body = `<label class="field"><span class="label">How many no-spend days each month?</span><input id="g-n" inputmode="numeric" value="${cfg.goal || ''}" placeholder="e.g. 10"></label>`;
   else if (g.type === 'streak') body = `<label class="field"><span class="label">How many no-spend days in a row?</span><input id="g-n" inputmode="numeric" value="${cfg.streakGoal || ''}" placeholder="e.g. 5"></label>`;
-  else body = `<div class="field"><span class="label">What do you want to go without?</span>
-      <div class="hab-add"><select id="hab-kind"><option value="tag">Tag</option><option value="store">Store</option><option value="cat">Category</option></select>
-      <input id="hab-v" placeholder="e.g. Eating out, Amazon" list="hab-v-list"><datalist id="hab-v-list">${[...(H().tags || []), ...(H().stores || []), ...H().categories.map(x => x.name)].map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
-      <p class="small muted">Counts the days since you last bought it — like “No eating out: 12 days”.</p></div>`;
+  else {
+    const kind = g.kind || 'store';
+    const opts = kind === 'store' ? (H().stores || []) : kind === 'tag' ? (H().tags || []) : H().categories.map(x => x.name);
+    body = `<div class="field"><span class="label">What do you want to go without?</span>
+      <div class="seg">${[['store', 'A store'], ['tag', 'A tag'], ['cat', 'A category']].map(([k, l]) => `<button type="button" class="${kind === k ? 'on' : ''}" data-act="goal-kind" data-v="${k}">${l}</button>`).join('')}</div>
+      <div class="chips">${opts.map(x => `<button type="button" class="chip ${g.v === x ? 'on' : ''}" data-act="goal-pick" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      ${kind === 'cat' ? '' : `<input id="hab-v" placeholder="${kind === 'store' ? 'Or type a store, e.g. Amazon' : 'Or type a tag'}" value="${esc(g.v && !opts.includes(g.v) ? g.v : '')}" style="margin-top:8px">`}
+      <p class="small muted">Counts the days since you last ${kind === 'store' ? 'shopped there' : 'bought it'} — like “No Amazon: 12 days”.</p></div>`;
+  }
   return `<div class="sheet-head"><h2>Add a goal</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
     <div class="seg goal-types">${types.map(([k, l]) => `<button type="button" class="${g.type === k ? 'on' : ''}" data-act="goal-type" data-v="${k}">${l}</button>`).join('')}</div>
     ${body}
@@ -1832,12 +1876,15 @@ function setupRemindDay(ym) {
 function setupPrompt() {
   const cur = D.curYm();
   const next = D.addMonths(cur, 1);
-  if (S.months[next] && S.months[next].setup) return null;
-  if (!(S.months[cur] && S.months[cur].setup)) return null; // set up this month first (its own card shows)
-  const day = new Date().getDate();
+  const now = new Date();
+  const day = now.getDate();
   const last = D.daysIn(cur);
-  if (day >= setupRemindDay(cur)) return { kind: 'banner', ym: next };
-  if (day > last - 7) return { kind: 'icon', ym: next };
+  if (!(S.months[cur] && S.months[cur].setup)) return { kind: 'start', ym: cur, banner: true };
+  if (S.months[next] && S.months[next].setup) return null;
+  const planned = !!(S.months[next] && S.months[next].planned);
+  if (day === last && now.getHours() >= 18) return { kind: 'start', ym: next, banner: true, planned };
+  if (!planned && day >= setupRemindDay(cur)) return { kind: 'plan', ym: next, banner: true };
+  if (day > last - 7) return { kind: 'plan', ym: next, banner: false, planned };
   return null;
 }
 
@@ -1858,7 +1905,7 @@ function tourSteps() {
   st.push(
     { route: 'home', page: 'budgets', sel: '.spend-sum', title: 'Budgets', text: 'How much is left to spend this month, with a card for each category below. Tap a card to log or see its purchases.' },
     { route: 'home', page: 'budgets', sel: ['#fab', '#fab2'], showBoth: true, title: 'Tracking spending: Log or Import', text: '+ Log: add a purchase right after you buy it (you can split one receipt across categories). Import: download your bank’s transactions as a CSV file weekly (or as often as you like) and the app sorts them for you. Or do both — anything you already logged is matched, never counted twice. Choose in Settings → Setup.' },
-    { route: 'home', sel: '.setup-icon', showSetup: true, title: 'Set up next month', text: 'In the last week of the month this icon shows up here, then a banner after your last payday (change when in Settings → Setup). Do this at the end of the month, when you’re ready to move on to the next one. It walks through your checking balance, bills, budgets, paychecks and what moves to savings. Anything you planned on the Year tab (income, OT, one-time expenses) fills in automatically — you can still change it.' },
+    { route: 'home', sel: '.setup-icon', showSetup: true, title: 'Plan & start next month', text: 'In the last week of the month this icon shows up here to plan next month — bills, budgets and paychecks (a banner reminds you after your last payday). Nothing changes this month. Then on the evening of the last day, “Start” the new month: your checking balance and what moves to savings. Anything you planned on the Year tab fills in automatically.' },
     ...(habitsOn() ? [{ route: 'habits', sel: '.habits-cal', title: 'Habits', text: 'Green days are no-spend days — nothing bought in the categories you pick (bills never count). Watch your streak, and tap + under Goals to aim for no-spend days, days in a row, or habits like “No eating out”.' }] : []),
     habitsOn() ? { route: 'habits', sel: '.bd-icon', title: 'Breakdown & search', text: 'Tap here to see where the money went by category, store or tag — and search any purchase ever.' } : { route: 'breakdown', sel: '.psearch', title: 'Breakdown & search', text: 'Where the money went by category, store or tag — and search any purchase ever.' },
     { route: 'year', sel: '.months', title: 'Year', text: 'Your savings projected month by month. Tap a month to plan raises, overtime, Christmas or anything one-time.' },
@@ -2284,7 +2331,7 @@ function viewSettingsSetup() {
     ${(sv.log || []).length ? `<details class="small"><summary>Savings history</summary>${[...sv.log].reverse().slice(0, 40).map(l => `<div class="line small"><span>${new Date(l.t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(l.note || l.kind)}</span><span>${l.kind === 'set' && l.note === 'Starting balance' ? money(l.amount) : (l.amount >= 0 ? '+' : '') + money(l.amount)}</span></div>`).join('')}</details>` : ''}
   </section>
   <section class="card"><h2>Month-end reminder</h2>
-    <p class="small muted">When “Set up next month” shows on the $ page as a banner (a small icon appears the last week of the month).</p>
+    <p class="small muted">When the “Plan next month” banner shows on the $ page. (A small 📋 icon is there all of the last week, and “Start next month” shows the evening of the last day.)</p>
     <div class="seg">${[['friday', 'Last Friday'], ['last3', 'Last 3 days'], ['day', 'Pick a day']].map(([k, l]) => { const m = H().setupRemind || 'friday'; const on = k === 'day' ? /^\d+$/.test(m) : m === k; return `<button class="${on ? 'on' : ''}" data-act="remind" data-v="${k === 'day' ? (/^\d+$/.test(m) ? m : '25') : k}">${l}</button>`; }).join('')}</div>
     ${/^\d+$/.test(H().setupRemind || '') ? `<label class="field"><span class="label">Starting on day</span><input data-ch="remind-day" inputmode="numeric" value="${esc(H().setupRemind)}"></label>` : ''}
     <p class="small muted">This month: from ${D.name(D.curYm())} ${D.ordinal(setupRemindDay(D.curYm()))}.</p>
@@ -2503,16 +2550,19 @@ const acts = {
   'hab-save': async () => { const hb = S.hab; closeSheet(); await saveHabits({ cats: hb.cats, tags: hb.tags }); toast('Saved'); },
   'goal-add': () => openGoalAdd(),
   'goal-type': el => { S.gadd.type = el.dataset.v; $('#sheet').innerHTML = goalAddHtml(); },
+  'goal-kind': el => { S.gadd.kind = el.dataset.v; S.gadd.v = ''; $('#sheet').innerHTML = goalAddHtml(); },
+  'goal-pick': el => { S.gadd.v = S.gadd.v === el.dataset.v ? '' : el.dataset.v; $('#sheet').innerHTML = goalAddHtml(); },
   'goal-save': async () => {
     const g = S.gadd;
     if (g.type === 'avoid') {
-      const kind = $('#hab-kind').value;
-      const raw = $('#hab-v').value.trim();
-      if (!raw) { toast('Type what to go without'); return; }
+      const kind = g.kind || 'store';
+      const raw = (($('#hab-v') && $('#hab-v').value.trim()) || g.v || '').trim();
+      if (!raw) { toast(kind === 'store' ? 'Pick or type a store' : kind === 'tag' ? 'Pick or type a tag' : 'Pick a category'); return; }
       const cat = kind === 'cat' ? H().categories.find(x => x.name.toLowerCase() === raw.toLowerCase()) : null;
       if (kind === 'cat' && !cat) { toast('Pick one of your categories'); return; }
       const emoji = kind === 'cat' ? cat.emoji : /eat|food|restaurant/i.test(raw) ? '🍔' : /amazon|target|shop/i.test(raw) ? '🛍️' : /coffee|starbucks/i.test(raw) ? '☕' : '✨';
       closeSheet();
+      S.gadd = { type: 'avoid', kind };
       await saveHabits({ trackers: [...habitCfg().trackers, { id: newId(), kind, v: cat ? cat.id : raw, name: `No ${cat ? cat.name : raw}`, emoji }] });
     } else {
       const n = Math.round(num($('#g-n').value) || 0);
@@ -2839,8 +2889,10 @@ const acts = {
     $('#chart-tip').textContent = el.dataset.tip;
   },
 
-  'd-next': () => { readDraftInputs(); S.draft.step++; window.scrollTo(0, 0); render(); },
-  'd-back': () => { readDraftInputs(); S.draft.step--; window.scrollTo(0, 0); render(); },
+  'd-next': () => { readDraftInputs(); const d = S.draft; d.pos++; d.step = d.seq[d.pos]; window.scrollTo(0, 0); render(); },
+  'd-back': () => { readDraftInputs(); const d = S.draft; d.pos--; d.step = d.seq[d.pos]; window.scrollTo(0, 0); render(); },
+  'd-plan-save': () => savePlanned(false),
+  'd-plan-start': () => savePlanned(true),
   'd-cancel': () => { S.draft = null; },
   'd-toggle': el => {
     readDraftInputs();

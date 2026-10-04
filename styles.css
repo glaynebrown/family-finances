@@ -565,3 +565,4 @@ button.menu-row { display: flex; }
   --wall-dim: rgba(0, 0, 0, .45);
 }
 :root[data-theme="dark"] .pill { background: rgba(255, 255, 255, .9); }
+.setup-icon.planned i { position: absolute; right: 2px; bottom: 2px; font-style: normal; font-size: .62rem; font-weight: 900; background: var(--good); color: #fff; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; }
