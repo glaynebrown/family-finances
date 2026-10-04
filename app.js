@@ -1824,7 +1824,7 @@ function goalAddHtml() {
       <div class="seg">${[['store', 'A store'], ['tag', 'A tag'], ['cat', 'A category']].map(([k, l]) => `<button type="button" class="${kind === k ? 'on' : ''}" data-act="goal-kind" data-v="${k}">${l}</button>`).join('')}</div>
       <div class="chips">${opts.map(x => `<button type="button" class="chip ${g.v === x ? 'on' : ''}" data-act="goal-pick" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
       ${kind === 'cat' ? '' : `<input id="hab-v" placeholder="${kind === 'store' ? 'Or type a store, e.g. Amazon' : 'Or type a tag'}" value="${esc(g.v && !opts.includes(g.v) ? g.v : '')}" style="margin-top:8px">`}
-      <p class="small muted">Counts the days since you last ${kind === 'store' ? 'shopped there' : 'bought it'} — like “No Amazon: 12 days”.</p></div>`;
+      <p class="small muted">Counts the days since you last ${kind === 'store' ? 'shopped there' : 'bought it'}.</p></div>`;
   }
   return `<div class="sheet-head"><h2>Add a goal</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
     <div class="seg goal-types">${types.map(([k, l]) => `<button type="button" class="${g.type === k ? 'on' : ''}" data-act="goal-type" data-v="${k}">${l}</button>`).join('')}</div>
