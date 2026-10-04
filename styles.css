@@ -571,11 +571,13 @@ button.menu-row { display: flex; }
 :root {
   --pie-0: #8FAE8B; --pie-1: #7E9CB8; --pie-2: #C98B6B; --pie-3: #A88AA6; --pie-4: #CDB282;
   --pie-5: #6FA3A0; --pie-6: #C99197; --pie-7: #A3A46E; --pie-8: #9A97B8; --pie-9: #B87D5E;
+  --pie-10: #6C7FA0; --pie-11: #D4A07A; --pie-12: #7F8F6A; --pie-13: #8E6F87;
   --pie-none: #B5ADA6;
 }
 :root[data-theme="dark"] {
   --pie-0: #86A582; --pie-1: #7894AE; --pie-2: #BE8466; --pie-3: #A086A0; --pie-4: #C2A97C;
   --pie-5: #6A9A97; --pie-6: #BE8B91; --pie-7: #9A9B6A; --pie-8: #9390AF; --pie-9: #AE775A;
+  --pie-10: #677998; --pie-11: #C59573; --pie-12: #788765; --pie-13: #876A80;
   --pie-none: #6E6761;
 }
 .donut { position: relative; width: min(100%, 300px); aspect-ratio: 1; margin: -14px auto -4px; }
@@ -597,3 +599,16 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .icon-pick .cat-badge { width: 40px; height: 40px; }
 .icon-pick .small { line-height: 1.15; text-align: center; }
 .icon-pick.on { border-color: var(--c); background: rgba(var(--ink-rgb), .05); }
+.cat-badge.emo { line-height: 1; }
+.cat-lab { display: inline-flex; align-items: center; gap: 7px; vertical-align: middle; }
+.chip .cat-lab { gap: 6px; margin-left: -6px; }
+.donut-emo.in.emo { width: 30px; height: 30px; border-radius: 50%; background: #fff; display: grid; place-items: center; font-size: 1.05rem; line-height: 1; }
+.donut-emo.out.emo { background: #fff; border: 2px solid; font-size: .85rem; line-height: 1; }
+.ce-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-top: 10px; border: 2px solid transparent; border-radius: 14px; background: rgba(var(--ink-rgb), .04); }
+.ce-row.on { border-color: var(--c); }
+.ce-row .grow { display: flex; flex-direction: column; line-height: 1.25; }
+.swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin: 6px 0 14px; }
+.swatch { aspect-ratio: 1; width: 100%; border-radius: 50%; border: 0; padding: 0; cursor: pointer; box-shadow: 0 0 0 2px transparent; }
+.swatch.on { box-shadow: 0 0 0 2px var(--sheet), 0 0 0 4px var(--ink); }
+.swatch.auto { background: none; border: 2px dashed var(--sw); color: var(--ink); display: grid; place-items: center; }
+.swatch.auto .small { font-size: .62rem; font-weight: 700; }

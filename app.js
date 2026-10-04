@@ -326,7 +326,7 @@ function catCard(c) {
     : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
   const tapAct = H().trackMode === 'import' ? 'cat-list' : 'log';
   return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="${tapAct}" data-cat="${esc(c.id)}">
-    <div class="row between"><span class="cat-name"><span class="emoji">${esc(c.emoji || '•')}</span>${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
+    <div class="row between"><span class="cat-name">${catBadge(c.id, 30)}${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
   </div>`;
 }
@@ -410,7 +410,7 @@ function logHtml() {
   return `<div class="sheet-head"><h2>${L.id ? 'Edit purchase' : 'Log a purchase'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <label class="amount"><span>$</span><input id="l-amount" inputmode="decimal" placeholder="0.00" value="${esc(L.amount)}" autocomplete="off"></label>
   ${L.id && L.splitGroup ? `<p class="small muted">Part of a ${money(L.splitTotal)} receipt split across categories.</p>` : ''}
-  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, `${esc(c.emoji || '')} ${esc(c.name)}`)).join('')}${chip('l-cat', 'uncat', L.cat === 'uncat' || (L.id && !catById(L.cat)), '❔ Decide later')}</div>
+  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, catLabel(c, 20))).join('')}${chip('l-cat', 'uncat', L.cat === 'uncat' || (L.id && !catById(L.cat)), '❔ Decide later')}</div>
     ${L.id ? '' : '<button type="button" class="linkish small" data-act="l-split">Split between categories</button>'}</div>`}
   <div class="field"><span class="label">Store</span><div class="chips">${(H().stores || []).map(s => chip('l-store', s, L.store === s, esc(s))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
@@ -720,7 +720,7 @@ function openPlan(ym) {
     ${S.months[ym] && S.months[ym].setup
       ? `<p class="small muted">${D.name(ym)} is already set up — change its budgets on the Budgets page.</p>`
       : `<div class="field"><span class="label">Budgets for ${D.name(ym)} <span class="muted small">(starts from your normal amounts; used when you set up the month)</span></span>
-        ${H().categories.map(c => { const pb = (p.budgets || {})[c.id]; return `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="p-b-${esc(c.id)}" inputmode="decimal" value="${pb !== undefined && pb !== null ? pb : c.budget}"></div>`; }).join('')}</div>`}
+        ${H().categories.map(c => { const pb = (p.budgets || {})[c.id]; return `<div class="line"><span>${catLabel(c)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="p-b-${esc(c.id)}" inputmode="decimal" value="${pb !== undefined && pb !== null ? pb : c.budget}"></div>`; }).join('')}</div>`}
     <label class="field"><span class="label">Added to savings this month <span class="muted small">(leave blank to figure it automatically${y && y.kind === 'auto' ? `: ${money(y.savings)}` : ''})</span></span><input id="p-sav" inputmode="decimal" value="${v(p.savings)}"></label>
     <label class="field"><span class="label">Note</span><input id="p-note" value="${esc(p.note || '')}"></label>
     <div class="row end sheet-foot"><button class="btn" data-act="p-save">Save</button></div>`);
@@ -854,6 +854,7 @@ function refreshSearch() { const box = $('#pq-results'); if (box) box.innerHTML 
 // Chart icons: simple white line icons for categories on the Breakdown page
 // (emojis turned white lose their detail). Each category gets one picked from
 // its emoji/name, or the one chosen in Settings → Categories (c.icon).
+// c.emoji is now only a hint for that automatic pick (not shown).
 const CAT_ICONS = {
   cart: ['Groceries', '<circle cx="8" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h2.5l2.6 12a2 2 0 0 0 2 1.6h9a2 2 0 0 0 1.9-1.5L21.5 7H5.4"/>'],
   utensils: ['Eating out', '<path d="M7 2v20M4 2v6a3 3 0 0 0 6 0V2"/><path d="M17 22V2c-2.5 1-4 3.5-4 7v4h4"/>'],
@@ -932,16 +933,27 @@ function catIconKey(c) {
   return hit ? hit[0] : 'tag';
 }
 const catIconSvg = (key, size) => `<svg class="ci" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${CAT_ICONS[key] ? CAT_ICONS[key][1] : CAT_ICONS.tag[1]}</svg>`;
-// Icon in a circle of the category's color (Breakdown rows, Settings)
-const catBadge = (key, size = 28) => `<span class="cat-badge" style="background:${catColor(key)};width:${size}px;height:${size}px">${catIconSvg(catIconKey(catById(key)), Math.round(size * 0.58))}</span>`;
+// A category's symbol everywhere: its white line icon in a circle of its color,
+// or — if they typed their own emoji (c.customEmoji) — that emoji on a light
+// tint of the color.
+function catBadge(key, size = 28) {
+  const c = catById(key);
+  const dim = `width:${size}px;height:${size}px`;
+  if (c && c.customEmoji) return `<span class="cat-badge emo" style="background:color-mix(in srgb, ${catColor(key)} 24%, var(--mix-base));${dim};font-size:${Math.round(size * 0.56)}px">${esc(c.customEmoji)}</span>`;
+  return `<span class="cat-badge" style="background:${catColor(key)};${dim}">${catIconSvg(catIconKey(c), Math.round(size * 0.58))}</span>`;
+}
+const catLabel = (c, size = 22) => `<span class="cat-lab">${catBadge(c.id, size)}<span>${esc(c.name)}</span></span>`;
 
-// Category colors: a fixed muted palette (styles.css --pie-N, softened in dark
-// mode), picked by the category's place in the list so a category keeps its
-// color month to month. Uncategorized / old categories are grey.
-const PIE_N = 10;
+// Category colors: a muted palette (styles.css --pie-N, softened in dark mode).
+// A category uses the color picked in Settings (c.color = palette number), else
+// one by its place in the list (first 10 colors). Uncategorized / old are grey.
+const PIE_N = 10, PIE_ALL = 14;
 function catColor(key) {
-  const i = (H().categories || []).findIndex(c => c.id === key);
-  return i < 0 ? 'var(--pie-none)' : `var(--pie-${i % PIE_N})`;
+  const cats = H().categories || [];
+  const i = cats.findIndex(c => c.id === key);
+  if (i < 0) return 'var(--pie-none)';
+  const pick = cats[i].color;
+  return `var(--pie-${Number.isInteger(pick) && pick >= 0 && pick < PIE_ALL ? pick : i % PIE_N})`;
 }
 
 // Donut of this month's category spending. Big slices hold their white line
@@ -970,7 +982,8 @@ function donutHtml(items, total) {
     a += span;
     return s;
   });
-  const iconOf = (s, size) => catIconSvg(catIconKey(catById(s.key)), size);
+  const ceOf = s => { const c = catById(s.key); return c && c.customEmoji; };
+  const iconOf = (s, size) => ceOf(s) ? esc(ceOf(s)) : catIconSvg(catIconKey(catById(s.key)), size);
   // Inside if the slice's arc at mid radius has room for an emoji
   segs.forEach(s => { s.inside = segs.length === 1 || s.span * mid >= 30; s.la = s.m; });
   // Spread outside dots apart so neighbors don't overlap
@@ -1001,9 +1014,9 @@ function donutHtml(items, total) {
     return `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" style="stroke:${s.color}" stroke-width="1.5" stroke-linecap="round"/>`;
   }).join('');
   const labels = segs.map(s => {
-    if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in" style="${pos(x, y)}">${iconOf(s, 22)}</span>`; }
+    if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in ${ceOf(s) ? 'emo' : ''}" style="${pos(x, y)}">${iconOf(s, 22)}</span>`; }
     const [x, y] = pt(LR, s.la);
-    return `<button class="donut-emo out" style="${pos(x, y)};background:${s.color}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}">${iconOf(s, 15)}</button>`;
+    return `<button class="donut-emo out ${ceOf(s) ? 'emo' : ''}" style="${pos(x, y)};${ceOf(s) ? `border-color:${s.color}` : `background:${s.color}`}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}">${iconOf(s, 15)}</button>`;
   }).join('');
   return `<div class="donut"><svg viewBox="-150 -150 300 300">${lines}${paths}</svg>${labels}${center}</div>`;
 }
@@ -1054,7 +1067,7 @@ function openItem(key) {
   const ym = S.bdYm || homeYm();
   const tab = S.bdTab;
   const c = tab === 'cat' ? catById(key) : null;
-  const title = tab === 'cat' ? (c ? `${c.emoji || ''} ${c.name}` : key === 'uncat' ? 'Uncategorized' : 'Old category') : (key || 'No store');
+  const title = tab === 'cat' ? (c ? c.name : key === 'uncat' ? 'Uncategorized' : 'Old category') : (key || 'No store');
   const months = Array.from({ length: 12 }, (_, i) => D.addMonths(ym, i - 11));
   const val = m => {
     const s = Calc.spent(S.purchases, m);
@@ -1276,7 +1289,7 @@ function matchLogged(rows) {
 }
 
 const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
-  + H().categories.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc((c.emoji || '') + ' ' + c.name)}</option>`).join('')
+  + H().categories.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')
   + `<option value="uncat" ${sel === 'uncat' ? 'selected' : ''}>Uncategorized (decide later)</option>`
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
 
@@ -1563,7 +1576,7 @@ function viewSetup() {
     const any = c.spent.list.length;
     const under = c.cats.filter(x => !x.over && x.used > 0);
     body = `<h2>How did ${D.name(R)} go?</h2>
-      ${any ? c.cats.map(x => `<div class="line ${x.over ? 'over-line' : ''}"><span>${esc(x.emoji || '')} ${esc(x.name)} ${x.over ? `<span class="small over-txt">${calm() ? 'over by' : 'over'} ${money(x.used - x.budget)}</span>` : x.used > 0 ? `<span class="small good">${money(x.left)} under 🎉</span>` : ''}</span><b>${money(x.used)} <span class="small muted">/ ${money(x.budget)}</span></b></div>`).join('')
+      ${any ? c.cats.map(x => `<div class="line ${x.over ? 'over-line' : ''}"><span>${catLabel(x)} ${x.over ? `<span class="small over-txt">${calm() ? 'over by' : 'over'} ${money(x.used - x.budget)}</span>` : x.used > 0 ? `<span class="small good">${money(x.left)} under 🎉</span>` : ''}</span><b>${money(x.used)} <span class="small muted">/ ${money(x.budget)}</span></b></div>`).join('')
         + `<p class="small muted">${c.cats.some(x => x.over) ? (calm() ? 'Anything over is just information — maybe that budget needs a little more room, or it was a one-off month.' : 'Categories over budget are highlighted.') : 'Everything stayed within budget. Nice work.'} <a href="#/breakdown" data-act="bd-go" data-ym="${R}">See the breakdown ›</a></p>`
         : `<p class="muted">Nothing was logged in the app for ${D.name(R)} — that’s fine, this is a fresh start.</p>`}
       `;
@@ -1597,7 +1610,7 @@ function viewSetup() {
       <h3>Additional income</h3><p class="small muted">Refunds or extra money you’re expecting this month.</p>${rows('back', 'received')}${add('back')}`;
   } else if (d.step === 3) {
     body = `<h2>Budgets for ${D.name(N)}</h2><p class="muted">Start from your normal amounts. Trim any this month if things are tight — next month goes back to normal.</p>
-      ${H().categories.map(c => `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="d-b-${esc(c.id)}" inputmode="decimal" value="${esc(d.budgets[c.id])}"></div>`).join('')}
+      ${H().categories.map(c => `<div class="line"><span>${catLabel(c)} <span class="small muted">normally ${money(c.budget)}</span></span><input class="mini" id="d-b-${esc(c.id)}" inputmode="decimal" value="${esc(d.budgets[c.id])}"></div>`).join('')}
       <div class="line total-line"><span>Total</span><b>${money(Object.values(d.budgets).reduce((a, b) => a + (Number(b) || 0), 0))}</b></div>`;
   } else if (d.step === 4 && payInChecking()) {
     body = `<h2>Paychecks in ${D.name(N)}</h2><p class="muted">They land in checking during ${D.name(N)} and pay for ${D.name(D.addMonths(N, 1))}. Change any amount (overtime!) — you can edit them during the month too.</p>
@@ -2013,7 +2026,7 @@ function habitSheetHtml() {
   const chip = (act, v, on, label) => `<button type="button" class="chip ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${label}</button>`;
   return `<div class="sheet-head"><h2>What counts as spending</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
     <div class="field"><span class="label">What counts as spending?</span><p class="small muted">Green days on the calendar = nothing bought in these. Bills never count.</p>
-      <div class="chips">${H().categories.map(x => chip('hab-cat', x.id, c.cats.includes(x.id), `${esc(x.emoji || '')} ${esc(x.name)}`)).join('')}</div>
+      <div class="chips">${H().categories.map(x => chip('hab-cat', x.id, c.cats.includes(x.id), catLabel(x, 20))).join('')}</div>
       <p class="small muted" style="margin-top:8px">Tags</p><div class="chips">${(H().tags || []).map(t => chip('hab-tag', t, c.tags.includes(t), esc(t))).join('') || '<span class="small muted">No tags yet</span>'}</div></div>
     <div class="row end sheet-foot"><button class="btn" data-act="hab-save">Save</button></div>`;
 }
@@ -2251,7 +2264,7 @@ function viewNewYear() {
   } else if (ny.step === 1) {
     const total = h.categories.reduce((a, c) => a + (num(ny.budgets[c.id]) || 0), 0);
     body = `<h2>Budgets for ${Y}</h2><p class="muted">Normal monthly amounts starting January. Change any that should be different this year.</p>
-      ${h.categories.map(c => `<div class="line"><span>${esc(c.emoji || '')} ${esc(c.name)} <span class="small muted">now ${money(c.budget)}</span></span><input class="mini" id="ny-b-${esc(c.id)}" inputmode="decimal" value="${esc(ny.budgets[c.id])}"></div>`).join('')}
+      ${h.categories.map(c => `<div class="line"><span>${catLabel(c)} <span class="small muted">now ${money(c.budget)}</span></span><input class="mini" id="ny-b-${esc(c.id)}" inputmode="decimal" value="${esc(ny.budgets[c.id])}"></div>`).join('')}
       <div class="line subtotal"><span>Total</span><b>${money(total)}</b></div>`;
   } else if (ny.step === 2) {
     const later = b => [...(b.changes || []).filter(c => c.from > `${Y}-01` && c.from <= `${Y}-12`).map(c => ({ ...c, saved: true })), ...ny.billChanges.filter(c => c.bill === b.id)]
@@ -2405,8 +2418,7 @@ function catsEditHtml(intro = true) {
   const h = H();
   return `${intro ? '<p class="small muted">Normal monthly budgets. Trim a single month during setup.</p>' : ''}
     ${h.categories.map((c, i) => `<div class="edit-row">
-      <button class="cat-ic-btn" data-act="cat-icon" data-id="${esc(c.id)}" aria-label="Chart icon for ${esc(c.name)}">${catBadge(c.id, 34)}</button>
-      <input class="emoji-in" data-ch="cat" data-id="${esc(c.id)}" data-f="emoji" value="${esc(c.emoji || '')}" aria-label="Emoji">
+      <button class="cat-ic-btn" data-act="cat-icon" data-id="${esc(c.id)}" aria-label="Icon for ${esc(c.name)}">${catBadge(c.id, 34)}</button>
       <input class="grow" data-ch="cat" data-id="${esc(c.id)}" data-f="name" value="${esc(c.name)}" aria-label="Name">
       <input class="mini" data-ch="cat" data-id="${esc(c.id)}" data-f="budget" inputmode="decimal" value="${esc(c.budget)}" aria-label="Budget">
       <button class="x small" data-act="cat-up" data-id="${esc(c.id)}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
@@ -2719,7 +2731,7 @@ const acts = {
       if (!raw) { toast(kind === 'store' ? 'Pick or type a store' : kind === 'tag' ? 'Pick or type a tag' : 'Pick a category'); return; }
       const cat = kind === 'cat' ? H().categories.find(x => x.name.toLowerCase() === raw.toLowerCase()) : null;
       if (kind === 'cat' && !cat) { toast('Pick one of your categories'); return; }
-      const emoji = kind === 'cat' ? cat.emoji : /eat|food|restaurant/i.test(raw) ? '🍔' : /amazon|target|shop/i.test(raw) ? '🛍️' : /coffee|starbucks/i.test(raw) ? '☕' : '✨';
+      const emoji = kind === 'cat' ? (cat.customEmoji || cat.emoji || '✨') : /eat|food|restaurant/i.test(raw) ? '🍔' : /amazon|target|shop/i.test(raw) ? '🛍️' : /coffee|starbucks/i.test(raw) ? '☕' : '✨';
       closeSheet();
       S.gadd = { type: 'avoid', kind };
       await saveHabits({ trackers: [...habitCfg().trackers, { id: newId(), kind, v: cat ? cat.id : raw, name: `No ${cat ? cat.name : raw}`, emoji }] });
@@ -2758,7 +2770,7 @@ const acts = {
     if (!c) return;
     const list = Calc.spent(S.purchases, ym).list.filter(p => p.cat === c.id);
     S.sheet = 'soft';
-    openSheet(`<div class="sheet-head"><h2>${esc(c.emoji || '')} ${esc(c.name)}</h2><button class="x" data-act="close">×</button></div>
+    openSheet(`<div class="sheet-head"><h2 class="cat-name">${catBadge(c.id, 30)}${esc(c.name)}</h2><button class="x" data-act="close">×</button></div>
       <p class="small muted">${D.name(ym)} · ${money(c.used)} of ${money(c.budget)}${c.over ? ` · over by ${money(c.used - c.budget)}` : ` · ${money(c.left)} left`}</p>
       ${list.length ? list.map(p => purchaseRow(p)).join('') : '<p class="muted">Nothing in this category yet this month.</p>'}
       <p class="small muted">Tap a purchase to change its category, tags or note.</p>`);
@@ -3136,7 +3148,7 @@ const acts = {
   'cat-add': async () => {
     const name = $('#cat-name').value.trim();
     if (!name) return;
-    const cats = [...H().categories, { id: newId(), name, budget: num($('#cat-amt').value) || 0, emoji: '•' }];
+    const cats = [...H().categories, { id: newId(), name, budget: num($('#cat-amt').value) || 0 }];
     await B.setH([[['categories'], cats]]);
   },
   'cat-del': async el => {
@@ -3150,19 +3162,52 @@ const acts = {
     const cur = c.icon && CAT_ICONS[c.icon] ? c.icon : '';
     const auto = catIconKey({ ...c, icon: '' });
     S.sheet = 'soft';
-    openSheet(`<div class="sheet-head"><h2>Chart icon</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
-      <p class="small muted">Shows for ${esc(c.name)} in the Breakdown chart and list.</p>
+    const ce = c.customEmoji || '';
+    const autoColor = (H().categories.findIndex(x => x.id === c.id)) % PIE_N;
+    const curColor = Number.isInteger(c.color) ? c.color : -1;
+    openSheet(`<div class="sheet-head"><h2>Icon & color</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+      <p class="small muted">Shows everywhere ${esc(c.name)} appears.</p>
+      <span class="label">Color</span>
+      <div class="swatches">${Array.from({ length: PIE_ALL }, (_, n) => `<button class="swatch ${curColor === n ? 'on' : ''}" style="background:var(--pie-${n})" data-act="cat-color" data-id="${esc(c.id)}" data-v="${n}" aria-label="Color ${n + 1}"></button>`).join('')}
+        <button class="swatch auto ${curColor < 0 ? 'on' : ''}" style="--sw:var(--pie-${autoColor})" data-act="cat-color" data-id="${esc(c.id)}" data-v="" aria-label="Automatic color"><span class="small">Auto</span></button></div>
+      <span class="label">Icon</span>
+      <div class="ce-row ${ce ? 'on' : ''}" style="--c:${catColor(c.id)}"><input id="cat-ce" class="emoji-in" value="${esc(ce)}" placeholder="🙂" aria-label="Your own emoji" enterkeyhint="done">
+        <span class="grow small">Use your own emoji<span class="muted"> — any emoji from your keyboard, shown in color</span></span>
+        <button class="btn small" data-act="cat-ce-save" data-id="${esc(c.id)}">Use</button></div>
       <div class="icon-grid" style="--c:${catColor(c.id)}">
-        <button class="icon-pick ${cur ? '' : 'on'}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v=""><span class="cat-badge" style="background:var(--c)">${catIconSvg(auto, 20)}</span><span class="small">Automatic</span></button>
-        ${Object.keys(CAT_ICONS).filter(k => k !== 'question').map(k => `<button class="icon-pick ${cur === k ? 'on' : ''}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v="${k}"><span class="cat-badge" style="background:var(--c)">${catIconSvg(k, 20)}</span><span class="small">${esc(CAT_ICONS[k][0])}</span></button>`).join('')}
+        <button class="icon-pick ${cur || ce ? '' : 'on'}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v=""><span class="cat-badge" style="background:var(--c)">${catIconSvg(auto, 20)}</span><span class="small">Automatic</span></button>
+        ${Object.keys(CAT_ICONS).filter(k => k !== 'question').map(k => `<button class="icon-pick ${cur === k && !ce ? 'on' : ''}" data-act="cat-icon-pick" data-id="${esc(c.id)}" data-v="${k}"><span class="cat-badge" style="background:var(--c)">${catIconSvg(k, 20)}</span><span class="small">${esc(CAT_ICONS[k][0])}</span></button>`).join('')}
       </div>`);
   },
   'cat-icon-pick': async el => {
     const v = el.dataset.v;
     const cats = H().categories.map(c => {
       if (c.id !== el.dataset.id) return c;
-      const { icon, ...rest } = c;
+      const { icon, customEmoji, ...rest } = c;
       return v ? { ...rest, icon: v } : rest;
+    });
+    closeSheet();
+    await B.setH([[['categories'], cats]]);
+  },
+  'cat-color': async el => {
+    const v = el.dataset.v;
+    const cats = H().categories.map(c => {
+      if (c.id !== el.dataset.id) return c;
+      const { color, ...rest } = c;
+      return v === '' ? rest : { ...rest, color: Number(v) };
+    });
+    await B.setH([[['categories'], cats]]);
+    // Redraw the sheet in the new color once the saved change has come back
+    const want = v === '' ? undefined : Number(v);
+    for (let i = 0; i < 20 && (catById(el.dataset.id) || {}).color !== want; i++) await new Promise(r => setTimeout(r, 50));
+    if (document.querySelector('.swatches')) acts['cat-icon']({ dataset: { id: el.dataset.id } });
+  },
+  'cat-ce-save': async el => {
+    const v = ($('#cat-ce').value || '').trim();
+    const cats = H().categories.map(c => {
+      if (c.id !== el.dataset.id) return c;
+      const { customEmoji, ...rest } = c;
+      return v ? { ...rest, customEmoji: [...v].slice(0, 8).join('') } : rest;
     });
     closeSheet();
     await B.setH([[['categories'], cats]]);
