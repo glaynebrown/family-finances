@@ -182,7 +182,20 @@ function onColor(hex) {
 }
 const monthColor = ym => ((H().look || {}).colors || Looks.colors)[D.monthNum(ym)] || Looks.colors[D.monthNum(ym)];
 
+// Light / dark: each phone picks its own (Light by default, Dark, or Match phone).
+const themePref = () => { try { return localStorage.getItem('ne-theme') || 'light'; } catch (e) { return 'light'; } };
+const darkMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+const isDark = () => themePref() === 'dark' || (themePref() === 'auto' && !!(darkMQ && darkMQ.matches));
+function applyTheme() {
+  const dark = isDark();
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? '#1B1815' : '#F6F1EA';
+}
+if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener('change', () => { applyTheme(); applyLook(); });
+
 function applyLook() {
+  applyTheme();
   if (!H()) return;
   const look = H().look || {};
   const ym = homeYm();
@@ -190,7 +203,7 @@ function applyLook() {
   const vars = {
     '--accent': accent,
     '--on-accent': onColor(accent),
-    '--accent-ink': onColor(accent) === '#FFFFFF' ? accent : `color-mix(in srgb, ${accent} 62%, #2B2522)`,
+    '--accent-ink': onColor(accent) === '#FFFFFF' || isDark() ? accent : `color-mix(in srgb, ${accent} 62%, #2B2522)`,
     '--glass': String(look.glass === undefined ? 0.82 : look.glass),
     '--hfont': `'${look.heading || 'Oswald'}'`,
     '--bfont': `'${look.body || 'Nunito'}'`,
@@ -2298,7 +2311,13 @@ function viewSettingsLook() {
       .catch(e => { S.wallsLoaded = false; console.warn('wallpapers', e); });
   }
   const look = H().look || {};
+  const tp = themePref();
   return `<header class="hero small-hero ink-title"><a class="back" href="#/settings">‹ Settings</a><h1>Appearance</h1></header>
+
+  <section class="card"><h2>Light or dark</h2>
+    <div class="seg">${[['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match phone']].map(([k, l]) => `<button class="${tp === k ? 'on' : ''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}</div>
+    <p class="small muted">Just for this phone — everyone in the household can pick their own.</p>
+  </section>
 
   <section class="card"><h2>Months</h2><p class="small muted">Each month’s color and wallpaper. Tap a picture to change it.</p>
     <div class="month-grid">${D.MONTHS.map((m, i) => {
@@ -2512,6 +2531,7 @@ const acts = {
     await saveHabits(k === 'trk' ? { trackers: habitCfg().trackers.filter(t => t.id !== id) } : { [k]: 0 });
   },
   'remind': async el => { await B.setH([[['setupRemind'], el.dataset.v]]); },
+  theme: el => { try { localStorage.setItem('ne-theme', el.dataset.v); } catch (e) {} applyLook(); render(); },
   'tour-start': () => startTour(),
   'tour-next': () => { S.tour.i++; tourGo(); },
   'tour-back': () => { S.tour.i--; tourGo(); },
