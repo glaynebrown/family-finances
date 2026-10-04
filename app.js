@@ -1025,11 +1025,10 @@ function viewBreakdown() {
   const ym = S.bdYm || homeYm();
   setTimeout(() => ensureLoaded(ym).catch(e => console.warn('older purchases', e)), 0);
   const s = Calc.spent(S.purchases, ym);
-  const M = S.months[ym];
   const tab = S.bdTab;
   let items;
   if (tab === 'cat') {
-    items = (H().categories || []).map(c => ({ key: c.id, name: c.name, amt: s.cat[c.id] || 0, budget: Calc.budgetFor(H(), M, c) }));
+    items = (H().categories || []).map(c => ({ key: c.id, name: c.name, amt: s.cat[c.id] || 0 }));
     for (const k in s.cat) if (!catById(k)) items.push({ key: k, name: k === 'uncat' ? 'Uncategorized' : 'Old category', amt: s.cat[k] });
   } else {
     const src = tab === 'store' ? s.store : s.tag;
@@ -1051,8 +1050,8 @@ function viewBreakdown() {
     ${tab === 'cat' ? '' : `<div class="row between"><span class="label">Spent in ${D.name(ym)}</span><b class="big">${money(s.total)}</b></div>`}
     <div class="seg">${[['cat', 'Categories'], ['store', 'Stores'], ['tag', 'Tags']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="bd-tab" data-v="${k}">${l}</button>`).join('')}</div>
     ${items.length ? items.map(i => `<button class="bd-row" data-act="bd-item" data-key="${esc(i.key)}">
-        <span class="row between"><span class="${tab === 'cat' ? 'cat-name' : ''}">${tab === 'cat' ? catBadge(i.key) : ''}${esc(i.name)}</span><span><b>${money(i.amt)}</b>${i.budget !== undefined ? ` <span class="small muted">of ${money(i.budget)}</span>` : ''}</span></span>
-        <span class="bar thin"><i style="width:${(i.amt / max) * 100}%${tab === 'cat' ? `;background:${catColor(i.key)}` : ''}"></i></span>
+        <span class="row between"><span class="${tab === 'cat' ? 'cat-name' : ''}">${tab === 'cat' ? catBadge(i.key) : ''}${esc(i.name)}${tab === 'cat' && i.amt > 0 && s.total > 0 ? ` <span class="small muted pct">· ${Math.round((i.amt / s.total) * 100) || '<1'}%</span>` : ''}</span><b>${money(i.amt)}</b></span>
+        ${tab === 'cat' ? '' : `<span class="bar thin"><i style="width:${(i.amt / max) * 100}%"></i></span>`}
         <span class="small muted">${counts(i.key)} purchase${counts(i.key) === 1 ? '' : 's'} · see past months ›</span>
       </button>`).join('') : `<p class="muted">${tab === 'tag' ? 'No tagged purchases this month.' : 'Nothing logged this month.'}</p>`}
   </section>
