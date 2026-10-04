@@ -972,8 +972,8 @@ function donutHtml(items, total) {
   const slices = items.filter(i => i.amt > 0.004);
   const sum = slices.reduce((a, i) => a + i.amt, 0);
   const center = sum > 0
-    ? `<div class="donut-mid"><b>${money(total)}</b><span class="small muted">spent</span></div>`
-    : `<div class="donut-mid"><span class="small muted">Nothing logged yet</span></div>`;
+    ? `<div class="donut-mid"><div class="donut-hole"><b>${money(total)}</b><span class="small muted">spent</span></div></div>`
+    : `<div class="donut-mid"><div class="donut-hole"><span class="small muted">Nothing logged yet</span></div></div>`;
   if (!sum) return `<div class="donut"><svg viewBox="-150 -150 300 300" aria-hidden="true"><circle r="${mid}" fill="none" stroke="rgba(var(--ink-rgb), .1)" stroke-width="${R - r}"/></svg>${center}</div>`;
   let a = 0;
   const segs = slices.map(i => {
@@ -983,7 +983,7 @@ function donutHtml(items, total) {
     return s;
   });
   const ceOf = s => { const c = catById(s.key); return c && c.customEmoji; };
-  const iconOf = (s, size) => ceOf(s) ? esc(ceOf(s)) : catIconSvg(catIconKey(catById(s.key)), size);
+  const iconOf = (s, size) => ceOf(s) ? `<span class="e">${esc(ceOf(s))}</span>` : catIconSvg(catIconKey(catById(s.key)), size);
   // Inside if the slice's arc at mid radius has room for an emoji
   segs.forEach(s => { s.inside = segs.length === 1 || s.span * mid >= 30; s.la = s.m; });
   // Spread outside dots apart so neighbors don't overlap
@@ -1016,7 +1016,7 @@ function donutHtml(items, total) {
   const labels = segs.map(s => {
     if (s.inside) { const [x, y] = pt(mid, s.m); return `<span class="donut-emo in ${ceOf(s) ? 'emo' : ''}" style="${pos(x, y)}">${iconOf(s, 22)}</span>`; }
     const [x, y] = pt(LR, s.la);
-    return `<button class="donut-emo out ${ceOf(s) ? 'emo' : ''}" style="${pos(x, y)};${ceOf(s) ? `border-color:${s.color}` : `background:${s.color}`}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}">${iconOf(s, 15)}</button>`;
+    return `<button class="donut-emo out ${ceOf(s) ? 'emo' : ''}" style="${pos(x, y)};${ceOf(s) ? `border-color:${s.color}` : `background:${s.color}`}" data-act="bd-item" data-key="${esc(s.key)}" aria-label="${esc(catById(s.key) ? catById(s.key).name : 'Uncategorized')}">${iconOf(s, 14)}</button>`;
   }).join('');
   return `<div class="donut"><svg viewBox="-150 -150 300 300">${lines}${paths}</svg>${labels}${center}</div>`;
 }
