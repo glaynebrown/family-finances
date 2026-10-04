@@ -1041,7 +1041,7 @@ function viewBreakdown() {
   items.sort((a, b) => b.amt - a.amt);
   const counts = key => s.list.filter(p => (tab === 'cat' ? p.cat === key : tab === 'store' ? (p.store || '') === key : (p.tags || []).includes(key))).length;
   return `<header class="hero small-hero">${habitsOn() ? '<a class="back" href="#/habits">‹ Habits</a>' : ''}<h1>Breakdown</h1></header>
-  <div class="psearch"><input id="pq" type="search" placeholder="🔍 Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
+  <div class="psearch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input id="pq" type="search" placeholder="Search purchases" aria-label="Search purchases" value="${esc(S.pq || '')}" autocomplete="off" enterkeyhint="search"></div>
   <div id="pq-results">${S.pq ? searchResultsHtml(S.pq) : ''}</div>
   <div class="row between month-nav"><button class="nav" data-act="bd-m" data-d="-1" aria-label="Previous month">‹</button><h2>${D.name(ym)} ${D.yearOf(ym)}</h2><button class="nav" data-act="bd-m" data-d="1" aria-label="Next month">›</button></div>
   ${tab === 'cat' ? donutHtml(items, s.total) : ''}

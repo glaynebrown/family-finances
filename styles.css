@@ -484,8 +484,9 @@ body.has-wall .home-hero h1, body.has-wall .small-hero h1 { text-shadow: none; }
 .spend-sum .uncat-jump { font-weight: 800; font-size: inherit; font-family: inherit; color: var(--ink); }
 
 /* Purchase search (Review) */
-.psearch { margin: 0 0 12px; }
-.psearch input { border-radius: 99px; padding: 11px 16px; }
+.psearch { margin: 0 0 12px; position: relative; }
+.psearch input { border-radius: 99px; padding: 11px 16px 11px 42px; }
+.psearch svg { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); width: 19px; height: 19px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; pointer-events: none; }
 
 /* App tour */
 #tour { position: fixed; inset: 0; z-index: 60; }
