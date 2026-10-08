@@ -319,8 +319,8 @@ window.addEventListener('hashchange', e => {
 
 function catCard(c) {
   const pct = c.budget > 0 ? Math.min(100, (c.used / c.budget) * 100) : (c.used > 0 ? 100 : 0);
-  // Tapping the amount left changes this month's budget for the category;
-  // tapping anywhere else on the card logs a purchase (or lists them, in import mode).
+  // Tapping the amount left changes this month's budget for the category; the icon
+  // lists this month's purchases; anywhere else logs one (or lists them, in import mode).
   const right = c.over
     ? `<button class="val-edit over-txt" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${calm() ? 'Over by ' : 'Over budget: '}${money(c.used - c.budget)}</button>`
     : `<button class="val-edit" data-act="left" data-cat="${esc(c.id)}" aria-label="Change what's left in ${esc(c.name)}">${money(c.left)}</button> <span class="muted small">left</span>`;
@@ -331,7 +331,7 @@ function catCard(c) {
   const nameOf = id => (catById(id) || {}).name || 'an old category';
   const notes = covers.map(x => `<div class="small muted cover-note">${x.to === c.id ? `Covered ${money(x.amount)} from ${esc(nameOf(x.from))}` : `${money(x.amount)} went to ${esc(nameOf(x.to))}`} <button class="linkish small" data-act="cover-undo" data-id="${esc(x.id)}" aria-label="Undo">undo</button></div>`).join('');
   return `<div class="cat card ${c.over ? 'over' : ''}" role="button" tabindex="0" data-act="${tapAct}" data-cat="${esc(c.id)}">
-    <div class="row between"><span class="cat-name">${catBadge(c.id, 30)}${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
+    <div class="row between"><span class="cat-name"><button class="cat-icon-btn" data-act="cat-list" data-cat="${esc(c.id)}" aria-label="${esc(c.name)} purchases this month">${catBadge(c.id, 30)}</button>${esc(c.name)}</span><span>${right} <span class="muted small of">/ <button class="val-edit small-edit" data-act="budget-edit" data-cat="${esc(c.id)}" aria-label="Change ${esc(c.name)}'s budget this month">${money(c.budget)}</button></span></span></div>
     <div class="bar"><i style="width:${pct}%"></i></div>
     ${c.over ? `<div class="cover-row"><button class="btn ghost small" data-act="cover" data-cat="${esc(c.id)}">Cover it ›</button></div>` : ''}${notes}
   </div>`;
@@ -2896,6 +2896,7 @@ function shrinkImage(file) {
 const acts = {
   close: () => closeSheet(),
   log: el => openLog({ cat: el.dataset.cat }),
+  'cat-log': el => { const cat = el.dataset.cat; closeSheet(); setTimeout(() => openLog({ cat }), 200); },
   'edit-p': el => { if (S.sheet === 'soft') { closeSheet(); setTimeout(() => openLog({ id: el.dataset.id }), 200); } else openLog({ id: el.dataset.id }); },
   'l-cat': el => { S.log.cat = el.dataset.v; redrawLog(); },
   'l-store': el => { S.log.store = S.log.store === el.dataset.v ? '' : el.dataset.v; redrawLog(); },
@@ -2998,9 +2999,10 @@ const acts = {
     const list = Calc.spent(S.purchases, ym).list.filter(p => p.cat === c.id);
     S.sheet = 'soft';
     openSheet(`<div class="sheet-head"><h2 class="cat-name">${catBadge(c.id, 30)}${esc(c.name)}</h2><button class="x" data-act="close">×</button></div>
-      <p class="small muted">${D.name(ym)} · ${money(c.used)} of ${money(c.budget)}${c.over ? ` · over by ${money(c.used - c.budget)}` : ` · ${money(c.left)} left`}</p>
+      <div class="cat-spent"><b>${money(c.used)} spent</b><span class="small muted">${D.name(ym)} · of ${money(c.budget)}${c.over ? ` · over by ${money(c.used - c.budget)}` : ` · ${money(c.left)} left`}</span></div>
       ${list.length ? list.map(p => purchaseRow(p)).join('') : '<p class="muted">Nothing in this category yet this month.</p>'}
-      <p class="small muted">Tap a purchase to change its category, tags or note.</p>`);
+      ${list.length ? '<p class="small muted">Tap a purchase to change it.</p>' : ''}
+      ${H().trackMode !== 'import' ? `<button class="btn full" data-act="cat-log" data-cat="${esc(c.id)}">+ Log a purchase</button>` : ''}`);
   },
   'imp-cancel': () => { S.imp = null; },
   'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
