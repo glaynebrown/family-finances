@@ -108,6 +108,17 @@ const Imp = (() => {
     return null;
   }
 
+  // This month's Additional income not checked off yet, closest within 10%.
+  function backGuess(months, rec) {
+    let best = null;
+    for (const b of (months[D.ymOf(rec.date)] || {}).back || []) {
+      const a = Number(b.amount) || 0;
+      const gap = Math.abs(a - rec.amount);
+      if (!b.received && a > 0 && gap <= a * 0.1 && (!best || gap < best.gap)) best = { b, gap };
+    }
+    return best && best.b;
+  }
+
   // No name match: a bill within a dollar (or 2%) of the payment that the bank
   // hasn't shown as paid yet that month. Closest amount wins.
   function billByAmount(H, rec, months) {
@@ -152,10 +163,25 @@ const Imp = (() => {
         const pr = findRule(rules, mkey);
         row.payCandidate = true;
         row.amount = rec.amount;
+        row.backGuess = (backGuess(months, rec) || {}).id || '';
         if (pr && pr.action === 'pay') { row.cat = 'pay'; row.reason = 'Paycheck (from your rule)'; return row; }
         if (pr && pr.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = 'Skipped by your rule'; return row; }
         row.reason = 'Money in — is this a paycheck?';
         row.remember = true;
+        return row;
+      }
+      // Other money in (mobile deposit, a check, ACH): one of this month's Additional
+      // income items within 10%? Otherwise it's offered as new Additional income.
+      const moneyIn = rec.credit && !isRefund && !venmo && !/^transfer$/i.test(rec.group) && !/transfer (from|to)/i.test(rec.desc);
+      if (moneyIn) {
+        const pr = findRule(rules, mkey);
+        if (pr && pr.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = 'Skipped by your rule'; return row; }
+        const guess = backGuess(months, rec);
+        row.incomeAsk = true;
+        row.amount = rec.amount;
+        row.backGuess = guess ? guess.id : '';
+        row.cat = guess ? '' : 'income';
+        row.reason = guess ? `Is this your ${guess.name} (${money(guess.amount)})?` : 'Money in — added to Additional income';
         return row;
       }
       if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
@@ -195,7 +221,7 @@ const Imp = (() => {
     });
     // Rows the categories list doesn't know (e.g. a deleted category) need a pick.
     const ids = new Set((H.categories || []).map(c => c.id));
-    for (const r of rows) if (r.cat && !['skip', 'uncat', 'pay'].includes(r.cat) && !ids.has(r.cat)) { r.cat = ''; }
+    for (const r of rows) if (r.cat && !['skip', 'uncat', 'pay', 'income'].includes(r.cat) && !ids.has(r.cat)) { r.cat = ''; }
     const dates = recs.map(r => r.post || r.date).sort();
     return { rows, from: dates[0], through: dates[dates.length - 1] };
   }

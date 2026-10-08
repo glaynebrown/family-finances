@@ -1289,7 +1289,7 @@ function pickImportFile() {
       }
       await ensureLoaded(D.curYm()).catch(() => {});
       sortRefunds(res.rows);
-      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')));
+      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || r.incomeAsk);
       if (H().trackMode === 'both') matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       location.hash = '#/import';
@@ -1344,7 +1344,7 @@ function matchLogged(rows) {
   logs.push(...Object.values(groups)); // a split receipt matches the bank charge as a whole
   const used = new Set();
   const taken = new Set();
-  const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && !r.billAsk && r.amount);
+  const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && !r.billAsk && !r.incomeAsk && r.amount);
   const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
   const exact = (r, x) => !used.has(x.id) && !taken.has(r) && Math.abs((Number(x.amount) || 0) - r.amount) < 0.005 && near(r, x);
   const pair = (r, x) => {
@@ -1418,6 +1418,17 @@ function rememberHtml(r) {
   return `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${label}</label>`;
 }
 
+// Money in: that month's Additional income items not checked off yet (the closest one
+// first, as "Yes"), or add it as a new one. Items picked on another row drop out.
+function backOptions(r) {
+  const taken = new Set(S.imp.rows.filter(y => y !== r && y.cat && y.cat.startsWith('back:')).map(y => y.cat));
+  const items = ((S.months[D.ymOf(r.date)] || {}).back || []).filter(b => !b.received && !taken.has(`back:${b.id}`));
+  const guess = items.find(b => b.id === r.backGuess);
+  const ordered = guess ? [guess, ...items.filter(b => b !== guess)] : items;
+  return ordered.map(b => `<option value="back:${esc(b.id)}" ${r.cat === `back:${b.id}` ? 'selected' : ''}>${b === guess ? 'Yes — ' : ''}${esc(b.name)} (${money(b.amount)})</option>`).join('')
+    + `<option value="income" ${r.cat === 'income' ? 'selected' : ''}>Something new — add it as Additional income</option>`;
+}
+
 function impRow(r) {
   if (r.status === 'logged') {
     return `<div class="imp-row logged"><div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
@@ -1437,6 +1448,14 @@ function impRow(r) {
       <div class="imp-ctl"><select data-ch="imp-which" data-i="${r.i}" aria-label="Is this one you logged?"><option value="" ${!r.pick ? 'selected' : ''}>Is this one you logged?</option>${opts.map(x => `<option value="${esc(x.id)}" ${r.pick === x.id ? 'selected' : ''}>Yes — ${esc(x.name)} ${money(x.amount)} on ${D.niceDay(x.date)}</option>`).join('')}<option value="new">No — it’s a new purchase</option></select></div>
     </div>`;
   }
+  if (r.incomeAsk) {
+    return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
+      <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
+      <div class="small muted">${esc(r.reason)}</div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
+      ${r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>` : ''}
+    </div>`;
+  }
   if (r.billAsk) {
     const bills = H().bills || [];
     const guess = bills.find(b => b.id === r.billGuess);
@@ -1453,8 +1472,8 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Paycheck?"><option value="" ${!r.cat ? 'selected' : ''}>Is this a paycheck?</option><option value="pay" ${r.cat === 'pay' ? 'selected' : ''}>Yes — a paycheck</option><option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
-      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always ${r.cat === 'pay' ? 'treat this as a paycheck' : 'skip this'}</label>` : ''}
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Paycheck?"><option value="" ${!r.cat ? 'selected' : ''}>Is this a paycheck?</option><option value="pay" ${r.cat === 'pay' ? 'selected' : ''}>Yes — a paycheck</option>${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
+      ${r.cat === 'pay' || r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always ${r.cat === 'pay' ? 'treat this as a paycheck' : 'skip this'}</label>` : ''}
     </div>`;
   }
   const needs = !r.cat && !r.splits;
@@ -1504,9 +1523,11 @@ function viewImport() {
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits and payments are skipped).</p>` : ''}
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.billAsk || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.billAsk || r.incomeAsk || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(isMoneyIn) ? ` + ${live.filter(isMoneyIn).length} money in` : ''}</button>
   </div>`;
 }
+
+const isMoneyIn = r => r.cat === 'income' || (!!r.cat && r.cat.startsWith('back:'));
 
 async function saveImport() {
   const I = S.imp;
@@ -1532,6 +1553,11 @@ async function saveImport() {
       for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
       continue;
     }
+    if (isMoneyIn(r)) { incomes.push(r); continue; }
+    if (r.incomeAsk) {
+      if (r.remember && r.cat === 'skip') rules[r.ruleKey] = { action: 'skip', name: r.name };
+      continue;
+    }
     if (r.billAsk) {
       // Picked a bill: it's paid (the bill section below checks it off at the real amount).
       r.billId = r.cat && r.cat.startsWith('bill:') ? r.cat.slice(5) : null;
@@ -1545,7 +1571,6 @@ async function saveImport() {
       if (r.cat === 'pay') pays.push(r);
       continue;
     }
-    if (r.cat === 'income') { incomes.push(r); continue; }
     if (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits)) {
       if (r.remember && r.cat === 'skip' && !r.ask) rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
@@ -1600,12 +1625,16 @@ async function saveImport() {
     await B.setMonthField(ym, ['incoming'], list);
     await syncPayPlan(list, ym);
   }
-  // Money in that isn't a refund: that month's Additional income, already received.
+  // Money in: checks off the Additional income item it was (at the real amount),
+  // or adds a new one, already received.
   const inByMonth = {};
   for (const r of incomes) (inByMonth[D.ymOf(r.date)] = inByMonth[D.ymOf(r.date)] || []).push(r);
   for (const ym in inByMonth) {
     const list = [...((S.months[ym] || {}).back || [])];
     for (const r of inByMonth[ym]) {
+      const at = Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime());
+      const item = r.cat.startsWith('back:') && list.find(b => `back:${b.id}` === r.cat);
+      if (item) { list[list.indexOf(item)] = { ...item, amount: Math.abs(r.amount), received: true, receivedAt: at, fromImport: true }; continue; }
       list.push({ id: newId(), name: r.name, amount: Math.abs(r.amount), received: true, receivedAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), fromImport: true });
     }
     await B.setMonthField(ym, ['back'], list);
