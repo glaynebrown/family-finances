@@ -1343,25 +1343,46 @@ function matchLogged(rows) {
   }
   logs.push(...Object.values(groups)); // a split receipt matches the bank charge as a whole
   const used = new Set();
+  const taken = new Set();
   const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && r.amount);
   const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
-  const best = (r, ok) => logs.filter(x => !used.has(x.id) && near(r, x) && ok(x))
-    .sort((a, b) => Math.abs(day(r.date) - day(a.date)) - Math.abs(day(r.date) - day(b.date)))[0];
-  for (const r of cands) {
-    const x = best(r, x => Math.abs((Number(x.amount) || 0) - r.amount) < 0.005);
-    if (!x) continue;
-    used.add(x.id);
-    Object.assign(r, { status: 'logged', matchId: x.id, reason: `Already logged: ${x.store || (catById(x.cat) || {}).name || 'purchase'} ${money(x.amount)} on ${D.niceDay(x.date)}` });
+  const exact = (r, x) => !used.has(x.id) && !taken.has(r) && Math.abs((Number(x.amount) || 0) - r.amount) < 0.005 && near(r, x);
+  const pair = (r, x) => {
+    used.add(x.id); taken.add(r);
+    Object.assign(r, { status: 'logged', matchId: x.id, reason: `Already logged: ${loggedName(x)} ${money(x.amount)} on ${D.niceDay(x.date)}` });
+  };
+  // Same day, same amount: a sure match.
+  for (const r of cands) { const x = logs.find(x => exact(r, x) && day(r.date) === day(x.date)); if (x) pair(r, x); }
+  // A few days apart: only when there's just one way to pair them up, and it's
+  // not a place with other same-amount charges in the file (the visit you logged
+  // may not have reached the bank yet, and this is an earlier one).
+  const repeat = r => rows.some(y => y !== r && Math.abs(y.amount - r.amount) < 0.005 && y.name === r.name);
+  for (const x of logs) {
+    const rs = cands.filter(r => exact(r, x));
+    if (rs.length === 1 && !repeat(rs[0]) && logs.filter(y => exact(rs[0], y)).length === 1) pair(rs[0], x);
   }
+  // More than one way (a place you go often): ask which one it is.
   for (const r of cands) {
-    if (r.status !== 'review') continue;
-    const x = best(r, x => !x.group && Math.sign(Number(x.amount) || 0) === Math.sign(r.amount) && sameStore(x.store, r.name)
-      && Math.abs((Number(x.amount) || 0) - r.amount) <= Math.max(5, Math.abs(r.amount) * 0.3));
-    if (!x) continue;
-    used.add(x.id);
+    const xs = logs.filter(x => exact(r, x));
+    if (xs.length) Object.assign(r, { which: xs.map(x => ({ id: x.id, name: loggedName(x), amount: Number(x.amount), date: x.date })), pick: '', firstNeeds: true });
+  }
+  // Same store, different amount (a tip, a changed charge): closest dates pair first.
+  const close = [];
+  for (const r of cands) {
+    if (taken.has(r) || r.which) continue;
+    for (const x of logs) {
+      if (used.has(x.id) || x.group || !near(r, x) || Math.sign(Number(x.amount) || 0) !== Math.sign(r.amount) || !sameStore(x.store, r.name)) continue;
+      if (Math.abs((Number(x.amount) || 0) - r.amount) > Math.max(5, Math.abs(r.amount) * 0.3)) continue;
+      close.push({ r, x, gap: Math.abs(day(r.date) - day(x.date)) });
+    }
+  }
+  for (const { r, x } of close.sort((a, b) => a.gap - b.gap)) {
+    if (used.has(x.id) || taken.has(r)) continue;
+    used.add(x.id); taken.add(r);
     Object.assign(r, { close: { id: x.id, amount: Number(x.amount), store: x.store || r.name, date: x.date }, closeSame: true, firstNeeds: true });
   }
 }
+const loggedName = x => x.store || (catById(x.cat) || {}).name || 'purchase';
 
 const catOptions = (sel, withSkip, withIncome) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
   + (withIncome ? `<option value="income" ${sel === 'income' ? 'selected' : ''}>Additional income (not a refund)</option>` : '')
@@ -1407,6 +1428,15 @@ function impRow(r) {
       <div class="small muted">Same as your logged ${esc(r.close.store)} ${money(r.close.amount)} on ${D.niceDay(r.close.date)}?</div>
       <div class="imp-ctl"><button class="btn small" disabled>✓ Update it to ${money(r.amount)}</button><button class="btn ghost small" data-act="imp-close" data-i="${r.i}">No, it’s different</button></div></div>`;
   }
+  if (r.which && r.pick !== 'new') {
+    const others = new Set(S.imp.rows.filter(y => y !== r && y.pick).map(y => y.pick));
+    const opts = r.which.filter(x => !others.has(x.id));
+    return `<div class="imp-row ${!r.pick ? 'needs' : ''}">
+      <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
+      <div class="small muted">${opts.length > 1 ? 'Close to a few purchases you logged — is it one of them?' : 'Close to a purchase you logged — is it the same one?'}</div>
+      <div class="imp-ctl"><select data-ch="imp-which" data-i="${r.i}" aria-label="Is this one you logged?"><option value="" ${!r.pick ? 'selected' : ''}>Is this one you logged?</option>${opts.map(x => `<option value="${esc(x.id)}" ${r.pick === x.id ? 'selected' : ''}>Yes — ${esc(x.name)} ${money(x.amount)} on ${D.niceDay(x.date)}</option>`).join('')}<option value="new">No — it’s a new purchase</option></select></div>
+    </div>`;
+  }
   if (r.payCandidate) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
@@ -1421,7 +1451,7 @@ function impRow(r) {
       <div class="small">${splitSumHtml(r)} · <button class="linkish small" data-act="imp-split-add" data-i="${r.i}">+ another</button> · <button class="linkish small" data-act="imp-split-off" data-i="${r.i}">undo split</button></div></div>` : '';
   return `<div class="imp-row ${needs ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
     <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount))}${r.amount < 0 ? ' <span class="small muted">back</span>' : ''}</b></div>
-    <div class="small muted">${esc(r.reason)}</div>
+    <div class="small muted">${esc(r.reason)}${r.which ? ` · new, not one you logged · <button class="linkish small" data-act="imp-which-undo" data-i="${r.i}">undo</button>` : ''}</div>
     ${r.splits ? split : `<div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Category">${catOptions(r.cat, true, r.amount < 0)}</select>
       ${r.cat !== 'skip' && r.cat !== 'income' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>
       ${r.amount > 0 ? `<button class="btn ghost small" data-act="imp-split" data-i="${r.i}">Split</button>` : ''}` : ''}</div>`}
@@ -1442,7 +1472,8 @@ function viewImport() {
   const skipped = live.filter(r => r.status === 'skip');
   const first = review.filter(r => r.firstNeeds);
   const rest = review.filter(r => !r.firstNeeds);
-  const open = review.filter(r => !r.cat && !r.splits && !r.payCandidate).length + review.filter(r => r.payCandidate && !r.cat).length;
+  const asking = r => r.which && r.pick !== 'new';
+  const open = review.filter(r => asking(r) && !r.pick).length + review.filter(r => !asking(r) && !r.cat && !r.splits && !r.payCandidate).length + review.filter(r => r.payCandidate && !r.cat).length;
   return `<header class="hero small-hero"><a class="back" href="#/home" data-act="imp-cancel">‹ Cancel</a><h1>Import</h1></header>
   <section class="card">
     <div class="line"><span><b>${D.niceDay(I.from)} – ${D.niceDay(I.through)}</b></span><span class="small muted">${esc(I.name)}</span></div>
@@ -1461,12 +1492,13 @@ function viewImport() {
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits are skipped).</p>` : ''}
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'income' || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
   </div>`;
 }
 
 async function saveImport() {
   const I = S.imp;
+  if (I.rows.some(r => r.status !== 'dup' && r.which && !r.pick)) { toast('Answer “Is this one you logged?” first'); return; }
   const now = Date.now();
   const purchases = [];
   const keysByMonth = {};
@@ -1481,8 +1513,9 @@ async function saveImport() {
     (keysByMonth[ym] = keysByMonth[ym] || []).push(r.key);
     if (r.post && r.post > latest) latest = r.post;
     // Already logged by hand: mark it bank-confirmed (and fix the amount if it changed).
-    if (r.status === 'logged' || (r.close && r.closeSame)) {
-      const id = r.matchId || r.close.id;
+    const picked = r.which && r.pick !== 'new' ? r.pick : null;
+    if (r.status === 'logged' || (r.close && r.closeSame) || picked) {
+      const id = r.matchId || picked || r.close.id;
       const hits = String(id).startsWith('g:') ? S.purchases.filter(x => `g:${x.splitGroup}` === id) : S.purchases.filter(x => x.id === id);
       for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
       continue;
@@ -2884,6 +2917,7 @@ const acts = {
   'dp-nav': el => { const inp = el.closest('.dp').querySelector('input[type="hidden"]'); dpSet(el, null, D.addMonths(inp.dataset.view, Number(el.dataset.d)), true); },
   'imp-logged': () => { S.imp.showLogged = !S.imp.showLogged; render(true); },
   'imp-unmatch': el => { const r = S.imp.rows[Number(el.dataset.i)]; Object.assign(r, { status: 'review', matchId: null, firstNeeds: !r.cat, reason: r.cat ? 'Added even though it looked logged' : 'Pick a category' }); render(true); },
+  'imp-which-undo': el => { S.imp.rows[Number(el.dataset.i)].pick = ''; render(true); },
   'imp-close': el => { const r = S.imp.rows[Number(el.dataset.i)]; r.closeSame = false; r.close = null; r.firstNeeds = !r.cat; render(true); },
   track: async el => {
     const v = el.dataset.v;
@@ -3511,6 +3545,14 @@ const changes = {
     const r = S.imp.rows[el.dataset.i];
     const v = el.value === '__new' ? await newTag() : el.value;
     if (v && !r.tags.includes(v)) r.tags.push(v);
+    render(true);
+  },
+  'imp-which': el => {
+    const r = S.imp.rows[el.dataset.i];
+    r.pick = el.value;
+    // Another charge that could only have been that logged purchase is new.
+    const picked = new Set(S.imp.rows.filter(y => y.pick && y.pick !== 'new').map(y => y.pick));
+    for (const y of S.imp.rows) if (y.which && !y.pick && y.which.every(x => picked.has(x.id))) y.pick = 'new';
     render(true);
   },
   'imp-bal': el => { S.imp.bal = el.value; },
