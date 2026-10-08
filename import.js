@@ -108,6 +108,21 @@ const Imp = (() => {
     return null;
   }
 
+  // No name match: a bill within a dollar (or 2%) of the payment that the bank
+  // hasn't shown as paid yet that month. Closest amount wins.
+  function billByAmount(H, rec, months) {
+    const ym = D.ymOf(rec.date);
+    const M = months[ym] || {};
+    let best = null;
+    for (const b of H.bills || []) {
+      if ((M.bills || {})[b.id] && M.bills[b.id].posted) continue;
+      const a = Calc.billCharge(M, b, ym);
+      const gap = Math.abs(a - rec.amount);
+      if (a > 0 && gap <= Math.max(1, a * 0.02) && (!best || gap < best.gap)) best = { b, gap };
+    }
+    return best && best.b;
+  }
+
   function classify(text, H, months) {
     const rules = H.rules || {};
     const recs = records(text);
@@ -147,11 +162,24 @@ const Imp = (() => {
       if (venmo) { row.reason = rec.credit ? 'Venmo in — your call' : 'Venmo — your call'; row.amount = rec.credit ? -rec.amount : rec.amount; return row; }
       // Bill payments (card or ACH) are skipped but remembered, so the bill shows as paid.
       const rule0 = findRule(rules, mkey);
-      const bill0 = !rec.credit && !(rule0 && rule0.action === 'cat') && billFor(H, rec);
+      const ruleBill = rule0 && rule0.action === 'bill' && (H.bills || []).find(b => b.id === rule0.billId);
+      const bill0 = !rec.credit && (ruleBill || (!(rule0 && rule0.action === 'cat') && billFor(H, rec)));
       if (bill0) {
         const amt = Calc.billCharge(months[D.ymOf(rec.date)], bill0, D.ymOf(rec.date));
         row.status = 'skip'; row.cat = 'skip'; row.billId = bill0.id; row.charged = rec.amount;
         row.reason = `Matches your ${bill0.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)} (expected ${money(amt)}); this month’s amount will be updated` : ''}`;
+        return row;
+      }
+      // Other payments out (ACH, "Payment to…", a loan or card transfer): which bill
+      // is it? Suggests one by amount; transfers between your own accounts stay skipped.
+      const payment = !rec.credit && !isBuy && !atm && (/^payment to /i.test(prettyName(rec.desc)) || /ach|bill ?pay/i.test(rec.group)
+        || /transfer to (loan|credit|card|visa|mortgage)/i.test(rec.desc));
+      if (payment) {
+        if (rule0 && rule0.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = rule0.note ? `Skipped — ${rule0.note}` : 'Skipped by your rule'; return row; }
+        const guess = billByAmount(H, rec, months);
+        row.billAsk = true;
+        row.billGuess = guess ? guess.id : '';
+        row.reason = guess ? `Is this your ${guess.name} bill (${money(Calc.billCharge(months[D.ymOf(rec.date)], guess, D.ymOf(rec.date)))})?` : 'A payment — is it one of your bills?';
         return row;
       }
       if (!isBuy && !isRefund) { row.status = 'skip'; row.cat = 'skip'; row.reason = rec.credit ? 'Money in (transfer/deposit)' : 'Transfer or payment'; return row; }

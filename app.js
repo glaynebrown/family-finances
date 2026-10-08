@@ -1344,7 +1344,7 @@ function matchLogged(rows) {
   logs.push(...Object.values(groups)); // a split receipt matches the bank charge as a whole
   const used = new Set();
   const taken = new Set();
-  const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && r.amount);
+  const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && !r.billAsk && r.amount);
   const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
   const exact = (r, x) => !used.has(x.id) && !taken.has(r) && Math.abs((Number(x.amount) || 0) - r.amount) < 0.005 && near(r, x);
   const pair = (r, x) => {
@@ -1437,6 +1437,18 @@ function impRow(r) {
       <div class="imp-ctl"><select data-ch="imp-which" data-i="${r.i}" aria-label="Is this one you logged?"><option value="" ${!r.pick ? 'selected' : ''}>Is this one you logged?</option>${opts.map(x => `<option value="${esc(x.id)}" ${r.pick === x.id ? 'selected' : ''}>Yes — ${esc(x.name)} ${money(x.amount)} on ${D.niceDay(x.date)}</option>`).join('')}<option value="new">No — it’s a new purchase</option></select></div>
     </div>`;
   }
+  if (r.billAsk) {
+    const bills = H().bills || [];
+    const guess = bills.find(b => b.id === r.billGuess);
+    const ordered = guess ? [guess, ...bills.filter(b => b !== guess)] : bills;
+    const picked = r.cat && r.cat.startsWith('bill:') ? bills.find(b => `bill:${b.id}` === r.cat) : null;
+    return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
+      <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
+      <div class="small muted">${esc(r.reason)}</div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Which bill?"><option value="" ${!r.cat ? 'selected' : ''}>${guess ? 'Is it?' : 'Which bill?'}</option>${ordered.map(b => `<option value="bill:${esc(b.id)}" ${r.cat === `bill:${b.id}` ? 'selected' : ''}>${b === guess ? `Yes — ${esc(b.name)}` : esc(b.name)}</option>`).join('')}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${guess ? 'No — not a bill, skip it' : 'Not a bill — skip it'}</option></select></div>
+      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${picked ? `Always match ${esc(r.name)} to ${esc(picked.name)}` : `Always skip ${esc(r.name)}`}</label>` : ''}
+    </div>`;
+  }
   if (r.payCandidate) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
@@ -1473,7 +1485,7 @@ function viewImport() {
   const first = review.filter(r => r.firstNeeds);
   const rest = review.filter(r => !r.firstNeeds);
   const asking = r => r.which && r.pick !== 'new';
-  const open = review.filter(r => asking(r) && !r.pick).length + review.filter(r => !asking(r) && !r.cat && !r.splits && !r.payCandidate).length + review.filter(r => r.payCandidate && !r.cat).length;
+  const open = review.filter(r => asking(r) && !r.pick).length + review.filter(r => !asking(r) && !r.cat && !r.splits && !r.payCandidate && !r.billAsk).length + review.filter(r => r.billAsk && !r.cat).length + review.filter(r => r.payCandidate && !r.cat).length;
   return `<header class="hero small-hero"><a class="back" href="#/home" data-act="imp-cancel">‹ Cancel</a><h1>Import</h1></header>
   <section class="card">
     <div class="line"><span><b>${D.niceDay(I.from)} – ${D.niceDay(I.through)}</b></span><span class="small muted">${esc(I.name)}</span></div>
@@ -1490,9 +1502,9 @@ function viewImport() {
   ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
-  ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits are skipped).</p>` : ''}
+  ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits and payments are skipped).</p>` : ''}
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.billAsk || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
   </div>`;
 }
 
@@ -1518,6 +1530,14 @@ async function saveImport() {
       const id = r.matchId || picked || r.close.id;
       const hits = String(id).startsWith('g:') ? S.purchases.filter(x => `g:${x.splitGroup}` === id) : S.purchases.filter(x => x.id === id);
       for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
+      continue;
+    }
+    if (r.billAsk) {
+      // Picked a bill: it's paid (the bill section below checks it off at the real amount).
+      r.billId = r.cat && r.cat.startsWith('bill:') ? r.cat.slice(5) : null;
+      r.charged = r.amount;
+      if (r.remember && r.billId) rules[r.ruleKey] = { action: 'bill', billId: r.billId, name: r.name };
+      else if (r.remember && r.cat === 'skip') rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
     }
     if (r.payCandidate) {
@@ -2627,7 +2647,7 @@ function viewSettingsSetup() {
     <p class="small muted">${trackHelp(h.trackMode || 'log')}</p>
     ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
       ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
-        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
+        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}${r.action === 'bill' ? (h.bills || []).map(b => `<option value="bill:${esc(b.id)}" ${r.billId === b.id ? 'selected' : ''}>Bill: ${esc(b.name)}</option>`).join('') : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
         <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
   </section>
   <section class="card"><h2>Savings goals</h2>
@@ -3601,7 +3621,7 @@ const changes = {
     const rules = { ...(H().rules || {}) };
     const old = rules[el.dataset.k] || {};
     const v = el.value;
-    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : { ...old, action: 'cat', cat: v };
+    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : v.startsWith('bill:') ? { ...old, action: 'bill', billId: v.slice(5) } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
   cover: el => { if (S.cover) { S.cover.amt[el.dataset.id] = Math.abs(num(el.value) || 0); refreshCoverSum(); } },
