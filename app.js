@@ -1425,7 +1425,7 @@ function viewImport() {
   </section>
   <section class="card">
     <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
-      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" placeholder="from your Navy Federal app" value="${esc(I.bal || '')}"></span></label>
+      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" value="${esc(I.bal || '')}"></span></label>
     <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
   </section>
   ${logged.length ? `<button class="linkish small add-link" data-act="imp-logged">${I.showLogged ? 'Hide' : 'Show'} ${logged.length} already logged ✓</button>${I.showLogged ? logged.map(impRow).join('') : ''}` : ''}
