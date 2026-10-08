@@ -1943,16 +1943,17 @@ async function finishWelcome(skipped) {
 
 /* ---------- Habits (no-spend days, streaks, trackers) ---------- */
 
-// What counts as "spending" for habits: chosen categories and tags (bills never count).
+// What counts as "spending" for habits: chosen categories, tags and stores (bills never count).
 // Default: Activities, Home, and anything tagged/categorized Eating out.
 function habitCfg() {
   const h = H();
   const hb = h.habits || {};
   const cats = hb.cats || h.categories.filter(c => /activit|^home/i.test(c.name) || /eating out/i.test(c.name)).map(c => c.id);
   const tags = hb.tags || (h.tags || []).filter(t => /eating out/i.test(t));
-  return { cats, tags, goal: Number(hb.goal) || 0, streakGoal: Number(hb.streakGoal) || 0, trackers: hb.trackers || [], order: hb.order || [] };
+  return { cats, tags, stores: hb.stores || [], goal: Number(hb.goal) || 0, streakGoal: Number(hb.streakGoal) || 0, trackers: hb.trackers || [], order: hb.order || [] };
 }
-const habitCounts = (p, cfg) => (Number(p.amount) || 0) > 0 && (cfg.cats.includes(p.cat) || (p.tags || []).some(t => cfg.tags.includes(t)));
+const habitCounts = (p, cfg) => (Number(p.amount) || 0) > 0 && (cfg.cats.includes(p.cat) || (p.tags || []).some(t => cfg.tags.includes(t))
+  || cfg.stores.some(s => String(p.store || '').toLowerCase().includes(s.toLowerCase())));
 // Days we can't know yet: import-only households, after the last import.
 const habitKnown = day => H().trackMode !== 'import' || ((H().imports || {}).through || '') >= day;
 
@@ -2093,7 +2094,7 @@ function goalCards(cfg, free, streak, isNow) {
 
 async function saveHabits(patch) {
   const c = habitCfg();
-  const next = { cats: c.cats, tags: c.tags, goal: c.goal, streakGoal: c.streakGoal, trackers: c.trackers, order: c.order, ...patch };
+  const next = { cats: c.cats, tags: c.tags, stores: c.stores, goal: c.goal, streakGoal: c.streakGoal, trackers: c.trackers, order: c.order, ...patch };
   await B.setH([[['habits'], next]]);
 }
 
@@ -2126,14 +2127,19 @@ function goalAddHtml() {
 }
 function openGoalEdit(el) {
   const cfg = habitCfg();
-  const k = el.dataset.k;
-  const tr = k === 'trk' ? cfg.trackers.find(t => t.id === el.dataset.id) : null;
-  S.gedit = { k, id: el.dataset.id };
+  S.gedit = { k: el.dataset.k, id: el.dataset.id };
   S.sheet = 'goal';
-  openSheet(`<div class="sheet-head"><h2>${tr ? `${esc(tr.emoji || '✨')} ${esc(tr.name)}` : k === 'goal' ? 'No-spend days a month' : 'Days in a row'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  S.hab = JSON.parse(JSON.stringify(cfg));
+  openSheet(goalEditHtml());
+}
+function goalEditHtml() {
+  const cfg = habitCfg();
+  const { k, id } = S.gedit;
+  const tr = k === 'trk' ? cfg.trackers.find(t => t.id === id) : null;
+  return `<div class="sheet-head"><h2>${tr ? `${esc(tr.emoji || '✨')} ${esc(tr.name)}` : k === 'goal' ? 'No-spend days a month' : 'Days in a row'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
     ${tr ? `<p class="muted">Counting the days since you last bought ${tr.kind === 'cat' ? `anything in ${esc((catById(tr.v) || {}).name || '')}` : esc(tr.v)}.</p>`
-      : `<label class="field"><span class="label">${k === 'goal' ? 'No-spend days each month' : 'No-spend days in a row'}</span><input id="g-n" inputmode="numeric" value="${cfg[k] || ''}"></label>`}
-    <div class="row between sheet-foot"><button class="btn ghost danger" data-act="goal-del">Remove goal</button>${tr ? '' : '<button class="btn" data-act="goal-update">Save</button>'}</div>`);
+      : `<label class="field"><span class="label">${k === 'goal' ? 'No-spend days each month' : 'No-spend days in a row'}</span><input id="g-n" inputmode="numeric" value="${esc(S.gedit.n !== undefined ? S.gedit.n : cfg[k] || '')}"></label>${habitPickHtml()}`}
+    <div class="row between sheet-foot"><button class="btn ghost danger" data-act="goal-del">Remove goal</button>${tr ? '' : '<button class="btn" data-act="goal-update">Save</button>'}</div>`;
 }
 
 function openHabitSettings() {
@@ -2143,15 +2149,27 @@ function openHabitSettings() {
   openSheet(habitSheetHtml());
 }
 function habitSheetHtml() {
-  const c = S.hab;
-  const chip = (act, v, on, label) => `<button type="button" class="chip ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${label}</button>`;
   return `<div class="sheet-head"><h2>What counts as spending</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
-    <div class="field"><span class="label">What counts as spending?</span><p class="small muted">Green days on the calendar = nothing bought in these. Bills never count.</p>
-      <div class="chips">${H().categories.map(x => chip('hab-cat', x.id, c.cats.includes(x.id), catLabel(x, 20))).join('')}</div>
-      <p class="small muted" style="margin-top:8px">Tags</p><div class="chips">${(H().tags || []).map(t => chip('hab-tag', t, c.tags.includes(t), esc(t))).join('') || '<span class="small muted">No tags yet</span>'}</div></div>
+    ${habitPickHtml()}
     <div class="row end sheet-foot"><button class="btn" data-act="hab-save">Save</button></div>`;
 }
-function redrawHab() { const y = $('#sheet').scrollTop; $('#sheet').innerHTML = habitSheetHtml(); $('#sheet').scrollTop = y; }
+// The categories, tags and stores that break a no-spend day (S.hab draft).
+function habitPickHtml() {
+  const c = S.hab;
+  const chip = (act, v, on, label) => `<button type="button" class="chip ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${label}</button>`;
+  const stores = [...(H().stores || [])];
+  for (const v of c.stores) if (!stores.some(x => x.toLowerCase() === v.toLowerCase())) stores.push(v);
+  return `<div class="field"><span class="label">What counts as spending?</span><p class="small muted">Green days on the calendar = nothing bought in these. Bills never count.</p>
+      <div class="chips">${H().categories.map(x => chip('hab-cat', x.id, c.cats.includes(x.id), catLabel(x, 20))).join('')}</div>
+      <p class="small muted" style="margin-top:8px">Tags</p><div class="chips">${(H().tags || []).map(t => chip('hab-tag', t, c.tags.includes(t), esc(t))).join('') || '<span class="small muted">No tags yet</span>'}</div>
+      <p class="small muted" style="margin-top:8px">Stores</p><div class="chips">${stores.map(v => chip('hab-store', v, c.stores.includes(v), esc(v))).join('')}</div>
+      <span class="add-inline"><input id="hab-store-new" placeholder="Or type a store, e.g. Amazon"><button class="btn small" data-act="hab-store-add">Add</button></span></div>`;
+}
+function redrawHab() {
+  const y = $('#sheet').scrollTop;
+  if (S.sheet === 'goal') { const n = $('#g-n'); if (n) S.gedit.n = n.value; $('#sheet').innerHTML = goalEditHtml(); } else $('#sheet').innerHTML = habitSheetHtml();
+  $('#sheet').scrollTop = y;
+}
 
 /* ---------- Month-end setup reminder ($ page) ---------- */
 
@@ -2840,7 +2858,15 @@ const acts = {
   'hab-settings': () => { if (sheetOpen()) { closeSheet(); setTimeout(openHabitSettings, 200); } else openHabitSettings(); },
   'hab-cat': el => { const v = el.dataset.v; const c = S.hab; c.cats = c.cats.includes(v) ? c.cats.filter(x => x !== v) : [...c.cats, v]; redrawHab(); },
   'hab-tag': el => { const v = el.dataset.v; const c = S.hab; c.tags = c.tags.includes(v) ? c.tags.filter(x => x !== v) : [...c.tags, v]; redrawHab(); },
-  'hab-save': async () => { const hb = S.hab; closeSheet(); await saveHabits({ cats: hb.cats, tags: hb.tags }); toast('Saved'); },
+  'hab-store': el => { const v = el.dataset.v; const c = S.hab; c.stores = c.stores.includes(v) ? c.stores.filter(x => x !== v) : [...c.stores, v]; redrawHab(); },
+  'hab-store-add': () => {
+    const v = $('#hab-store-new').value.trim();
+    if (!v) { toast('Type a store'); return; }
+    const c = S.hab;
+    if (!c.stores.some(x => x.toLowerCase() === v.toLowerCase())) c.stores = [...c.stores, v];
+    redrawHab();
+  },
+  'hab-save': async () => { const hb = S.hab; closeSheet(); await saveHabits({ cats: hb.cats, tags: hb.tags, stores: hb.stores }); toast('Saved'); },
   'goal-add': () => openGoalAdd(),
   'goal-type': el => { S.gadd.type = el.dataset.v; $('#sheet').innerHTML = goalAddHtml(); },
   'goal-kind': el => { S.gadd.kind = el.dataset.v; S.gadd.v = ''; $('#sheet').innerHTML = goalAddHtml(); },
@@ -2866,7 +2892,7 @@ const acts = {
     toast('Goal added');
   },
   'goal-edit': el => openGoalEdit(el),
-  'goal-update': async () => { const n = Math.round(num($('#g-n').value) || 0); if (n < 1) { toast('Type a number of days'); return; } const k = S.gedit.k; closeSheet(); await saveHabits({ [k]: n }); },
+  'goal-update': async () => { const n = Math.round(num($('#g-n').value) || 0); if (n < 1) { toast('Type a number of days'); return; } const k = S.gedit.k; const hb = S.hab; closeSheet(); await saveHabits({ [k]: n, cats: hb.cats, tags: hb.tags, stores: hb.stores }); },
   'goal-del': async () => {
     const { k, id } = S.gedit;
     if (!(await ask('Remove this goal?', 'Remove'))) return;
