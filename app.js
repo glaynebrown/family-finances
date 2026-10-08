@@ -1289,7 +1289,7 @@ function pickImportFile() {
       }
       await ensureLoaded(D.curYm()).catch(() => {});
       sortRefunds(res.rows);
-      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || r.incomeAsk);
+      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || (r.incomeAsk && !(r.cat || '').startsWith('held:')));
       if (H().trackMode === 'both') matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       location.hash = '#/import';
@@ -1429,6 +1429,16 @@ function backOptions(r) {
     + `<option value="income" ${r.cat === 'income' ? 'selected' : ''}>Something new — add it as Additional income</option>`;
 }
 
+// Transfers in: shared-bill shares still owed that month (closest first, as "Yes").
+const heldPicked = r => (r.cat || '').startsWith('held:') && ((S.months[D.ymOf(r.date)] || {}).held || []).find(h => `held:${h.id}` === r.cat);
+function heldOptions(r) {
+  const taken = new Set(S.imp.rows.filter(y => y !== r && (y.cat || '').startsWith('held:')).map(y => y.cat));
+  const items = ((S.months[D.ymOf(r.date)] || {}).held || []).filter(h => !h.received && !taken.has(`held:${h.id}`));
+  const guess = items.find(h => h.id === r.heldGuess);
+  const bill = h => ((H().bills || []).find(b => b.id === h.bill) || {}).name;
+  return (guess ? [guess, ...items.filter(h => h !== guess)] : items).map(h => `<option value="held:${esc(h.id)}" ${r.cat === `held:${h.id}` ? 'selected' : ''}>${h === guess ? 'Yes — ' : ''}${esc(h.name)}’s ${esc(bill(h) || '')} share (${money(h.amount)})</option>`).join('');
+}
+
 function impRow(r) {
   if (r.status === 'logged') {
     return `<div class="imp-row logged"><div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
@@ -1452,8 +1462,9 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess || r.heldGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : r.transferIn ? `<option value="" ${!r.cat ? 'selected' : ''}>What is it?</option>` : ''}${r.transferIn ? heldOptions(r) : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${r.transferIn ? 'No — my own money moving, skip it' : 'No — skip it'}</option></select></div>
       ${r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>` : ''}
+      ${heldPicked(r) ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always match ${esc(r.name)} to ${esc(heldPicked(r).name)}’s share</label>` : ''}
     </div>`;
   }
   if (r.billAsk) {
@@ -1464,8 +1475,8 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Which bill?"><option value="" ${!r.cat ? 'selected' : ''}>${guess ? 'Is it?' : 'Which bill?'}</option>${ordered.map(b => `<option value="bill:${esc(b.id)}" ${r.cat === `bill:${b.id}` ? 'selected' : ''}>${b === guess ? `Yes — ${esc(b.name)}` : esc(b.name)}</option>`).join('')}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${guess ? 'No — not a bill, skip it' : 'Not a bill — skip it'}</option></select></div>
-      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${picked ? `Always match ${esc(r.name)} to ${esc(picked.name)}` : `Always skip ${esc(r.name)}`}</label>` : ''}
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Which bill?"><option value="" ${!r.cat ? 'selected' : ''}>${guess ? 'Is it?' : 'What is it?'}</option><optgroup label="Bills">${ordered.map(b => `<option value="bill:${esc(b.id)}" ${r.cat === `bill:${b.id}` ? 'selected' : ''}>${b === guess ? `Yes — ${esc(b.name)}` : esc(b.name)}</option>`).join('')}</optgroup><optgroup label="Spending">${H().categories.map(c => `<option value="${esc(c.id)}" ${r.cat === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')}</optgroup><option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${guess ? 'No — skip it' : 'Skip it (my own money moving)'}</option></select></div>
+      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${picked ? `Always match ${esc(r.name)} to ${esc(picked.name)}` : r.cat === 'skip' ? `Always skip ${esc(r.name)}` : `Always put ${esc(r.name)} in ${esc((catById(r.cat) || {}).name || '')}`}</label>` : ''}
     </div>`;
   }
   if (r.payCandidate) {
@@ -1523,11 +1534,14 @@ function viewImport() {
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits and payments are skipped).</p>` : ''}
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.billAsk || r.incomeAsk || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(isMoneyIn) ? ` + ${live.filter(isMoneyIn).length} money in` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || billOrSkip(r) || r.incomeAsk || r.cat === 'income' || (r.which && r.pick !== 'new') || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => isMoneyIn(r) || isShare(r)) ? ` + ${live.filter(r => isMoneyIn(r) || isShare(r)).length} money in` : ''}</button>
   </div>`;
 }
 
 const isMoneyIn = r => r.cat === 'income' || (!!r.cat && r.cat.startsWith('back:'));
+const isShare = r => !!r.cat && r.cat.startsWith('held:');
+// "Money out" questions answered with a bill, skip, or not at all (a category = a purchase).
+const billOrSkip = r => r.billAsk && (!r.cat || r.cat === 'skip' || r.cat.startsWith('bill:'));
 
 async function saveImport() {
   const I = S.imp;
@@ -1538,6 +1552,7 @@ async function saveImport() {
   const rules = { ...(H().rules || {}) };
   const pays = [];
   const incomes = [];
+  const shares = [];
   let latest = (H().imports || {}).through || '';
   const confirm = [];
   for (const r of I.rows) {
@@ -1554,11 +1569,16 @@ async function saveImport() {
       continue;
     }
     if (isMoneyIn(r)) { incomes.push(r); continue; }
+    if (isShare(r)) {
+      shares.push(r);
+      if (r.remember) rules[r.ruleKey] = { action: 'held', helperId: r.cat.slice(5), name: r.name };
+      continue;
+    }
     if (r.incomeAsk) {
       if (r.remember && r.cat === 'skip') rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
     }
-    if (r.billAsk) {
+    if (billOrSkip(r)) {
       // Picked a bill: it's paid (the bill section below checks it off at the real amount).
       r.billId = r.cat && r.cat.startsWith('bill:') ? r.cat.slice(5) : null;
       r.charged = r.amount;
@@ -1639,6 +1659,16 @@ async function saveImport() {
     }
     await B.setMonthField(ym, ['back'], list);
   }
+  // Shared-bill shares that came in: checked off at the real amount.
+  const shByMonth = {};
+  for (const r of shares) (shByMonth[D.ymOf(r.date)] = shByMonth[D.ymOf(r.date)] || []).push(r);
+  for (const ym in shByMonth) {
+    const list = ((S.months[ym] || {}).held || []).map(h => {
+      const r = shByMonth[ym].find(x => x.cat === `held:${h.id}`);
+      return r ? { ...h, amount: r.amount, received: true, receivedAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), fromImport: true } : h;
+    });
+    await B.setMonthField(ym, ['held'], list);
+  }
   for (const ym in keysByMonth) {
     const had = (S.months[ym] || {}).importedKeys || [];
     await B.setMonthField(ym, ['importedKeys'], [...new Set([...had, ...keysByMonth[ym]])]);
@@ -1649,7 +1679,7 @@ async function saveImport() {
   S.imp = null;
   S.page = 'budgets';
   location.hash = '#/home';
-  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${pays.length ? ` · ${pays.length} paycheck${pays.length === 1 ? '' : 's'}` : ''}${incomes.length ? ` · ${incomes.length} money in` : ''}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
+  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${pays.length ? ` · ${pays.length} paycheck${pays.length === 1 ? '' : 's'}` : ''}${incomes.length + shares.length ? ` · ${incomes.length + shares.length} money in` : ''}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
 }
 
 /* ---------- Month setup (the Checklist, step by step) ---------- */
@@ -2676,7 +2706,7 @@ function viewSettingsSetup() {
     <p class="small muted">${trackHelp(h.trackMode || 'log')}</p>
     ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
       ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
-        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}${r.action === 'bill' ? (h.bills || []).map(b => `<option value="bill:${esc(b.id)}" ${r.billId === b.id ? 'selected' : ''}>Bill: ${esc(b.name)}</option>`).join('') : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
+        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}${r.action === 'held' ? (h.helpers || []).map(x => `<option value="held:${esc(x.id)}" ${r.helperId === x.id ? 'selected' : ''}>Share: ${esc(x.name)}</option>`).join('') : ''}${r.action === 'bill' ? (h.bills || []).map(b => `<option value="bill:${esc(b.id)}" ${r.billId === b.id ? 'selected' : ''}>Bill: ${esc(b.name)}</option>`).join('') : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
         <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
   </section>
   <section class="card"><h2>Savings goals</h2>
@@ -3650,7 +3680,7 @@ const changes = {
     const rules = { ...(H().rules || {}) };
     const old = rules[el.dataset.k] || {};
     const v = el.value;
-    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : v.startsWith('bill:') ? { ...old, action: 'bill', billId: v.slice(5) } : { ...old, action: 'cat', cat: v };
+    rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : v.startsWith('bill:') ? { ...old, action: 'bill', billId: v.slice(5) } : v.startsWith('held:') ? { ...old, action: 'held', helperId: v.slice(5) } : { ...old, action: 'cat', cat: v };
     await B.setH([[['rules'], rules]]);
   },
   cover: el => { if (S.cover) { S.cover.amt[el.dataset.id] = Math.abs(num(el.value) || 0); refreshCoverSum(); } },
