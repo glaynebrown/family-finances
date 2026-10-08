@@ -1287,7 +1287,9 @@ function pickImportFile() {
       if (last && res.from && res.from > D.dayStr(new Date(new Date(last + 'T12:00').getTime() + 864e5))) {
         gap = `Your last import went through ${D.niceDay(last)}, but this file starts ${D.niceDay(res.from)}. A few days might be missing — download a longer date range to be safe.`;
       }
-      for (const r of res.rows) r.firstNeeds = r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')));
+      await ensureLoaded(D.curYm()).catch(() => {});
+      sortRefunds(res.rows);
+      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')));
       if (H().trackMode === 'both') matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       location.hash = '#/import';
@@ -1296,18 +1298,41 @@ function pickImportFile() {
   f.click();
 }
 
+// Bank name vs. a store name: same letters, or a 4+ letter word of the store inside it.
+const letters = x => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
+function sameStore(store, bankName) {
+  const bank = letters(bankName);
+  const whole = letters(store);
+  if (whole.length >= 4 && bank.includes(whole)) return true;
+  return String(store || '').toLowerCase().split(/[^a-z]+/).some(w => w.length >= 4 && bank.includes(w));
+}
+
+// Money back from the bank: a refund from a store you've bought from goes back to
+// that purchase's category; anything else is Additional income (you can change it).
+function sortRefunds(rows) {
+  const ids = new Set(H().categories.map(c => c.id));
+  const past = S.purchases.filter(p => (Number(p.amount) || 0) > 0 && ids.has(p.cat)).sort((a, b) => (a.date < b.date ? 1 : -1));
+  for (const r of rows) {
+    if (r.kind !== 'refund' || r.status !== 'review' || r.venmo || r.reason.startsWith('From your rule')) continue;
+    const hit = past.find(p => p.date <= r.date && sameStore(p.store, r.name))
+      || rows.find(x => x !== r && x.kind === 'buy' && x.cat && ids.has(x.cat) && x.ruleKey === r.ruleKey);
+    r.ask = false;
+    if (hit) {
+      r.cat = hit.cat;
+      r.reason = `Refund — back to ${catById(hit.cat).name} (last bought there ${D.niceDay(hit.date)})`;
+    } else {
+      r.cat = 'income';
+      r.tags = [];
+      r.reason = 'Money in — added to Additional income';
+    }
+  }
+}
+
 // "Both" mode: bank rows that are purchases already logged by hand. Same amount within
 // a few days = already logged (it just gets marked bank-confirmed). Same store but a
 // different amount (a tip, a pending charge that changed) = asks to update the log.
 // Each logged purchase matches at most one bank row.
 function matchLogged(rows) {
-  const letters = x => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
-  const sameStore = (store, bankName) => {
-    const bank = letters(bankName);
-    const whole = letters(store);
-    if (whole.length >= 4 && bank.includes(whole)) return true;
-    return String(store || '').toLowerCase().split(/[^a-z]+/).some(w => w.length >= 4 && bank.includes(w));
-  };
   const day = d => new Date(`${d}T12:00`).getTime() / 864e5;
   const logs = [];
   const groups = {};
@@ -1338,7 +1363,8 @@ function matchLogged(rows) {
   }
 }
 
-const catOptions = (sel, withSkip) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
+const catOptions = (sel, withSkip, withIncome) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
+  + (withIncome ? `<option value="income" ${sel === 'income' ? 'selected' : ''}>Additional income (not a refund)</option>` : '')
   + H().categories.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')
   + `<option value="uncat" ${sel === 'uncat' ? 'selected' : ''}>Uncategorized (decide later)</option>`
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
@@ -1361,7 +1387,7 @@ function splitSumHtml(r) {
 // "Always…" checkbox: remember this store's category and/or tags for next time.
 // Starts unchecked, so one-off purchases (Amazon, Target…) don't make a rule.
 function rememberHtml(r) {
-  if (r.venmo || r.splits) return '';
+  if (r.venmo || r.splits || r.cat === 'income') return '';
   if (r.cat === 'skip') return `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>`;
   const cat = r.cat && !['skip', 'uncat'].includes(r.cat) ? catById(r.cat) : null;
   if (!cat && !r.tags.length) return '';
@@ -1396,8 +1422,8 @@ function impRow(r) {
   return `<div class="imp-row ${needs ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
     <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount))}${r.amount < 0 ? ' <span class="small muted">back</span>' : ''}</b></div>
     <div class="small muted">${esc(r.reason)}</div>
-    ${r.splits ? split : `<div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Category">${catOptions(r.cat, true)}</select>
-      ${r.cat !== 'skip' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>
+    ${r.splits ? split : `<div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Category">${catOptions(r.cat, true, r.amount < 0)}</select>
+      ${r.cat !== 'skip' && r.cat !== 'income' ? `<select data-ch="imp-tag" data-i="${r.i}" aria-label="Add a tag"><option value="">+ Tag</option>${(H().tags || []).filter(t => !r.tags.includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select>
       ${r.amount > 0 ? `<button class="btn ghost small" data-act="imp-split" data-i="${r.i}">Split</button>` : ''}` : ''}</div>`}
     ${tagChips ? `<div class="tags">${tagChips}</div>` : ''}
     ${rememberHtml(r)}
@@ -1435,7 +1461,7 @@ function viewImport() {
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits are skipped).</p>` : ''}
   <div class="import-save">
-    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}</button>
+    <button class="btn full" data-act="imp-save">Save ${live.reduce((n, r) => n + (r.payCandidate || r.cat === 'income' || (r.close && r.closeSame) || r.cat === 'skip' || (r.venmo && !r.cat && !r.splits) ? 0 : r.splits ? r.splits.filter(x => Number(x.amount)).length : 1), 0)} purchases${live.some(r => r.close && r.closeSame) ? ` + update ${live.filter(r => r.close && r.closeSame).length}` : ''}${live.some(r => r.payCandidate && r.cat === 'pay') ? ` + ${live.filter(r => r.payCandidate && r.cat === 'pay').length} paycheck${live.filter(r => r.payCandidate && r.cat === 'pay').length === 1 ? '' : 's'}` : ''}${live.some(r => r.cat === 'income') ? ` + ${live.filter(r => r.cat === 'income').length} money in` : ''}</button>
   </div>`;
 }
 
@@ -1446,6 +1472,7 @@ async function saveImport() {
   const keysByMonth = {};
   const rules = { ...(H().rules || {}) };
   const pays = [];
+  const incomes = [];
   let latest = (H().imports || {}).through || '';
   const confirm = [];
   for (const r of I.rows) {
@@ -1465,6 +1492,7 @@ async function saveImport() {
       if (r.cat === 'pay') pays.push(r);
       continue;
     }
+    if (r.cat === 'income') { incomes.push(r); continue; }
     if (r.cat === 'skip' || (r.venmo && !r.cat && !r.splits)) {
       if (r.remember && r.cat === 'skip' && !r.ask) rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
@@ -1519,6 +1547,16 @@ async function saveImport() {
     await B.setMonthField(ym, ['incoming'], list);
     await syncPayPlan(list, ym);
   }
+  // Money in that isn't a refund: that month's Additional income, already received.
+  const inByMonth = {};
+  for (const r of incomes) (inByMonth[D.ymOf(r.date)] = inByMonth[D.ymOf(r.date)] || []).push(r);
+  for (const ym in inByMonth) {
+    const list = [...((S.months[ym] || {}).back || [])];
+    for (const r of inByMonth[ym]) {
+      list.push({ id: newId(), name: r.name, amount: Math.abs(r.amount), received: true, receivedAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), fromImport: true });
+    }
+    await B.setMonthField(ym, ['back'], list);
+  }
   for (const ym in keysByMonth) {
     const had = (S.months[ym] || {}).importedKeys || [];
     await B.setMonthField(ym, ['importedKeys'], [...new Set([...had, ...keysByMonth[ym]])]);
@@ -1529,7 +1567,7 @@ async function saveImport() {
   S.imp = null;
   S.page = 'budgets';
   location.hash = '#/home';
-  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${pays.length ? ` · ${pays.length} paycheck${pays.length === 1 ? '' : 's'}` : ''}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
+  toast(`Imported ${purchases.length} purchase${purchases.length === 1 ? '' : 's'}${pays.length ? ` · ${pays.length} paycheck${pays.length === 1 ? '' : 's'}` : ''}${incomes.length ? ` · ${incomes.length} money in` : ''}${bal !== null ? ` · checking set to ${money(bal)}` : ''}`);
 }
 
 /* ---------- Month setup (the Checklist, step by step) ---------- */
@@ -3466,6 +3504,7 @@ const changes = {
     const r = S.imp.rows[el.dataset.i];
     r.cat = el.value;
     r.remember = false;
+    if (r.cat === 'income') r.tags = [];
     render(true);
   },
   'imp-tag': async el => {
