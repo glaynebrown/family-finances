@@ -578,12 +578,14 @@ button.menu-row { display: flex; }
   --pie-5: #6FA3A0; --pie-6: #C99197; --pie-7: #A3A46E; --pie-8: #9A97B8; --pie-9: #B87D5E;
   --pie-10: #6C7FA0; --pie-11: #D4A07A; --pie-12: #7F8F6A; --pie-13: #8E6F87;
   --pie-none: #B5ADA6;
+  --pie-unexp: #C9A04E;
 }
 :root[data-theme="dark"] {
   --pie-0: #86A582; --pie-1: #7894AE; --pie-2: #BE8466; --pie-3: #A086A0; --pie-4: #C2A97C;
   --pie-5: #6A9A97; --pie-6: #BE8B91; --pie-7: #9A9B6A; --pie-8: #9390AF; --pie-9: #AE775A;
   --pie-10: #677998; --pie-11: #C59573; --pie-12: #788765; --pie-13: #876A80;
   --pie-none: #6E6761;
+  --pie-unexp: #B8934A;
 }
 .donut { position: relative; width: min(100%, 300px); aspect-ratio: 1; margin: -14px auto -4px; }
 .donut > svg { display: block; width: 100%; height: 100%; overflow: visible; }
@@ -641,3 +643,8 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 /* Log sheet: Log it / Save stays in view at the bottom; the form scrolls behind it. */
 .sticky-foot { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); z-index: 1; background: var(--sheet);
   padding: 10px 0 calc(18px + env(safe-area-inset-bottom)); margin-bottom: calc(-18px - env(safe-area-inset-bottom)); box-shadow: 0 -8px 12px -10px rgba(0, 0, 0, .25); }
+/* Budgets: the Unexpected line under the category cards */
+.unexp-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; text-align: left; border: 0; font: inherit; color: inherit; cursor: pointer; }
+.unexp-line .cat-name { font-weight: 600; flex: 1; min-width: 0; }
+.unexp-line > i { font-style: normal; opacity: .5; }
+.unexp-sub { flex-basis: 100%; padding-left: 34px; }

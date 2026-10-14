@@ -293,7 +293,7 @@ const Imp = (() => {
     });
     // Rows the categories list doesn't know (e.g. a deleted category) need a pick.
     const ids = new Set((H.categories || []).map(c => c.id));
-    for (const r of rows) if (r.cat && !['skip', 'uncat', 'pay', 'income'].includes(r.cat) && !r.cat.includes(':') && !ids.has(r.cat)) { r.cat = ''; }
+    for (const r of rows) if (r.cat && !['skip', 'uncat', 'unexp', 'pay', 'income'].includes(r.cat) && !r.cat.includes(':') && !ids.has(r.cat)) { r.cat = ''; }
     const dates = recs.map(r => r.post || r.date).sort();
     return { rows, from: dates[0], through: dates[dates.length - 1] };
   }

@@ -266,12 +266,14 @@ const Calc = (() => {
     // spending outside the budgets: they're out of checking but don't use up any
     // budget, so Savings/Excess is lower until they're sorted (then it comes back).
     const ids = new Set((H.categories || []).map(c => c.id));
-    const uncat = round2(Object.keys(s.cat).filter(k => !ids.has(k)).reduce((a, k) => a + s.cat[k], 0));
+    // "Unexpected" (a lab bill, a license renewal) works the same way, but it's sorted -- not a to-do.
+    const uncat = round2(Object.keys(s.cat).filter(k => !ids.has(k) && k !== 'unexp').reduce((a, k) => a + s.cat[k], 0));
+    const unexp = round2(s.cat.unexp || 0);
     const excess = round2(est + backIn + owed - heldBack - nextPay - billsLeft - otherLeft - budgetsLeft);
     return {
       checking: round2(snap.amount), checkedAt: at, est: round2(est), since,
       backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), nextPay: round2(nextPay), billsLeft: round2(billsLeft),
-      otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s, uncat,
+      otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s, uncat, unexp,
     };
   }
 

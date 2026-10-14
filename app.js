@@ -27,7 +27,9 @@ const me = () => B.uid();
 const myName = () => ((H().people || {})[me()] || {}).name || (S.user && S.user.name) || 'there';
 const calm = () => !H() || !H().look || H().look.calm !== false;
 const homeYm = () => Calc.homeMonth(S.months);
-const catById = id => (H().categories || []).find(c => c.id === id);
+// "Unexpected" isn't a budget, but it shows like a category everywhere (name, icon, color).
+const UNEXP = { id: 'unexp', name: 'Unexpected', icon: 'bolt' };
+const catById = id => (id === 'unexp' ? UNEXP : (H().categories || []).find(c => c.id === id));
 const feat = k => ((H() && H().features) || {})[k];
 const checkingBuffer = () => { const b = ((H() && H().savings) || {}).buffer; return b === undefined || b === null ? 500 : Number(b) || 0; };
 const bucketsOn = () => !!feat('buckets');
@@ -430,7 +432,33 @@ function viewHome() {
     ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `${H().trackMode === 'both' ? 'Last import through' : 'Updated through'} ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
+  ${unexpLine(c.unexp, M)}
   ${uncatCard(c.spent)}`}`;
+}
+
+// Unexpected-but-necessary spending: outside the budgets, out of this month's extra.
+function unexpLine(total, M) {
+  if (!(total > 0.004)) return '';
+  const covered = ((M || {}).unexpCovers || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+  return `<button class="card unexp-line" data-act="unexp-open"><span class="cat-name">${catBadge('unexp', 26)}<span>Unexpected: ${money(total)} · from savings/excess</span></span><i>›</i>
+    ${covered ? `<span class="small muted unexp-sub">${money(covered)} covered from savings</span>` : ''}</button>`;
+}
+function unexpSheetHtml() {
+  const ym = homeYm();
+  const M = S.months[ym] || {};
+  const list = Calc.spent(S.purchases, ym).list.filter(p => p.cat === 'unexp');
+  const total = round2(list.reduce((a, p) => a + p.part, 0));
+  const covers = M.unexpCovers || [];
+  const covered = round2(covers.reduce((a, x) => a + (Number(x.amount) || 0), 0));
+  const left = Math.max(0, round2(total - covered));
+  const backs = M.back || [];
+  return `<div class="sheet-head"><h2 class="cat-name">${catBadge('unexp', 30)}Unexpected</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+    <div class="cat-spent"><b>${money(total)}</b><span class="small muted">${D.name(ym)} · outside your budgets, taken from this month’s savings/excess</span></div>
+    ${list.map(p => purchaseRow(p)).join('')}
+    ${covers.map(x => { const b = backs.find(y => y.id === x.backId); return `<div class="line small"><span>✓ Covered ${money(x.amount)} from savings${b && b.received ? ' · moved' : ' · move it to checking'}</span>${b && b.received ? '' : `<button class="linkish small" data-act="unexp-undo" data-id="${esc(x.id)}">undo</button>`}</div>`; }).join('')}
+    ${left ? `<div class="field"><span class="label">Cover from savings</span>
+      <div class="edit-row"><span class="amount move-amt"><span>$</span><input id="unexp-amt" inputmode="decimal" value="${left}"></span><button class="btn" data-act="unexp-cover">Cover it</button></div>
+      <p class="small muted">Lowers Savings now and adds “From savings” to Additional income, so this month’s extra goes back up. Move the money to checking in your bank app — the next import checks it off.</p></div>` : ''}`;
 }
 
 // Imported purchases nobody put in a category yet (they still count as spending).
@@ -470,7 +498,7 @@ function logHtml() {
   return `<div class="sheet-head"><h2>${L.id ? 'Edit purchase' : 'Log a purchase'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <label class="amount"><span>$</span><input id="l-amount" inputmode="decimal" placeholder="0.00" value="${esc(L.amount)}" autocomplete="off"></label>
   ${L.id && L.splitGroup ? `<p class="small muted">Part of a ${money(L.splitTotal)} receipt split across categories.</p>` : ''}
-  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, catLabel(c, 20))).join('')}${chip('l-cat', 'uncat', L.cat === 'uncat' || (L.id && !catById(L.cat)), '❔ Decide later')}</div>
+  ${!L.id && L.splits ? logSplitHtml(L) : `<div class="field"><span class="label">Category</span><div class="chips">${H().categories.map(c => chip('l-cat', c.id, L.cat === c.id, catLabel(c, 20))).join('')}${chip('l-cat', 'unexp', L.cat === 'unexp', '⚡ Unexpected')}${chip('l-cat', 'uncat', L.cat === 'uncat' || (L.id && !catById(L.cat)), '❔ Decide later')}</div>
     ${L.id ? '' : '<button type="button" class="linkish small" data-act="l-split">Split between categories</button>'}</div>`}
   <div class="field"><span class="label">Store</span><div class="chips">${(H().stores || []).map(s => chip('l-store', s, L.store === s, esc(s))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
@@ -1017,6 +1045,7 @@ const PIE_N = 10, PIE_ALL = 14;
 function catColor(key) {
   const cats = H().categories || [];
   const i = cats.findIndex(c => c.id === key);
+  if (key === 'unexp') return 'var(--pie-unexp)';
   if (i < 0) return 'var(--pie-none)';
   const pick = cats[i].color;
   return `var(--pie-${Number.isInteger(pick) && pick >= 0 && pick < PIE_ALL ? pick : i % PIE_N})`;
@@ -1095,6 +1124,7 @@ function viewBreakdown() {
   let items;
   if (tab === 'cat') {
     items = (H().categories || []).map(c => ({ key: c.id, name: c.name, amt: s.cat[c.id] || 0 }));
+    if (s.cat.unexp) items.push({ key: 'unexp', name: 'Unexpected', amt: s.cat.unexp });
     for (const k in s.cat) if (!catById(k)) items.push({ key: k, name: k === 'uncat' ? 'Uncategorized' : 'Old category', amt: s.cat[k] });
   } else {
     const src = tab === 'store' ? s.store : s.tag;
@@ -1405,6 +1435,7 @@ const loggedName = x => x.store || (catById(x.cat) || {}).name || 'purchase';
 const catOptions = (sel, withSkip, withIncome) => `<option value="" ${!sel ? 'selected' : ''}>Pick a category…</option>`
   + (withIncome ? `<option value="income" ${sel === 'income' ? 'selected' : ''}>Additional income (not a refund)</option>` : '')
   + H().categories.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')
+  + `<option value="unexp" ${sel === 'unexp' ? 'selected' : ''}>⚡ Unexpected (from savings/excess)</option>`
   + `<option value="uncat" ${sel === 'uncat' ? 'selected' : ''}>Uncategorized (decide later)</option>`
   + (withSkip ? `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip — don’t count it</option>` : '');
 
@@ -2140,7 +2171,7 @@ function habitCfg() {
   const tags = hb.tags || (h.tags || []).filter(t => /eating out/i.test(t));
   return { cats, tags, stores: hb.stores || [], goal: Number(hb.goal) || 0, streakGoal: Number(hb.streakGoal) || 0, trackers: hb.trackers || [], order: hb.order || [] };
 }
-const habitCounts = (p, cfg) => (Number(p.amount) || 0) > 0 && (cfg.cats.includes(p.cat) || (p.tags || []).some(t => cfg.tags.includes(t))
+const habitCounts = (p, cfg) => (Number(p.amount) || 0) > 0 && p.cat !== 'unexp' && (cfg.cats.includes(p.cat) || (p.tags || []).some(t => cfg.tags.includes(t))
   || cfg.stores.some(s => String(p.store || '').toLowerCase().includes(s.toLowerCase())));
 // Days we can't know yet: import-only households, after the last import.
 const habitKnown = day => H().trackMode !== 'import' || ((H().imports || {}).through || '') >= day;
@@ -3095,6 +3126,32 @@ const acts = {
   'tour-end': async () => { await endTour(); location.hash = '#/home'; render(true); },
   'export-csv': () => exportCSV().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
   'export-json': () => exportJSON().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
+  'unexp-open': () => { S.sheet = 'unexp'; openSheet(unexpSheetHtml()); },
+  'unexp-cover': async () => {
+    const amt = round2(Math.abs(num($('#unexp-amt').value) || 0));
+    if (!amt) { toast('Type an amount'); return; }
+    const ym = homeYm();
+    const M = S.months[ym] || {};
+    const names = [...new Set(Calc.spent(S.purchases, ym).list.filter(p => p.cat === 'unexp').map(p => p.store || 'Unexpected'))];
+    const label = names.slice(0, 2).join(', ') + (names.length > 2 ? '…' : '');
+    const backId = newId();
+    closeSheet();
+    await setSavings((Number((H().savings || {}).actual) || 0) - amt, `Covered unexpected: ${label}`, 'cover');
+    await monthList('back', arr => [...arr, { id: backId, name: `From savings: ${label}`, amount: amt, received: false, fromSavings: true }]);
+    await B.setMonthField(ym, ['unexpCovers'], [...(M.unexpCovers || []), { id: newId(), amount: amt, at: Date.now(), backId }]);
+    toast(`Covered ${money(amt)} — move it from savings to checking`);
+  },
+  'unexp-undo': async el => {
+    const ym = homeYm();
+    const M = S.months[ym] || {};
+    const x = (M.unexpCovers || []).find(y => y.id === el.dataset.id);
+    if (!x) return;
+    closeSheet();
+    await setSavings((Number((H().savings || {}).actual) || 0) + Number(x.amount), 'Undid: covered unexpected', 'undo');
+    await monthList('back', arr => arr.filter(o => o.id !== x.backId));
+    await B.setMonthField(ym, ['unexpCovers'], (M.unexpCovers || []).filter(y => y.id !== x.id));
+    toast('Undone');
+  },
   'to-uncat': () => { const c = $('.uncat-card'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
   eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
