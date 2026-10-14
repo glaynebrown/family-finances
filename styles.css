@@ -631,3 +631,6 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .cover-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; text-decoration: none; color: inherit; }
 #cover-save { white-space: nowrap; flex: none; }
 .sheet-foot .linkish { text-align: left; }
+
+.ready-toggle { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; width: 100%; text-align: left; }
+.ready-toggle i { font-style: normal; margin-left: auto; }

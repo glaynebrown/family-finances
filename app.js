@@ -1345,7 +1345,9 @@ function matchLogged(rows) {
   const used = new Set();
   const taken = new Set();
   const cands = rows.filter(r => r.status === 'review' && !r.payCandidate && !r.billAsk && !r.incomeAsk && r.amount);
-  const near = (r, x) => { const g = day(r.date) - day(x.date); return g >= -2 && g <= 5; };
+  // Bank dates are the day you bought it, so only a day or so of drift: same amount
+  // within 3 days, a different amount (tip, changed charge) within 2.
+  const near = (r, x, n = 3) => Math.abs(day(r.date) - day(x.date)) <= n;
   const exact = (r, x) => !used.has(x.id) && !taken.has(r) && Math.abs((Number(x.amount) || 0) - r.amount) < 0.005 && near(r, x);
   const pair = (r, x) => {
     used.add(x.id); taken.add(r);
@@ -1371,7 +1373,7 @@ function matchLogged(rows) {
   for (const r of cands) {
     if (taken.has(r) || r.which) continue;
     for (const x of logs) {
-      if (used.has(x.id) || x.group || !near(r, x) || Math.sign(Number(x.amount) || 0) !== Math.sign(r.amount) || !sameStore(x.store, r.name)) continue;
+      if (used.has(x.id) || x.group || !near(r, x, 2) || Math.sign(Number(x.amount) || 0) !== Math.sign(r.amount) || !sameStore(x.store, r.name)) continue;
       if (Math.abs((Number(x.amount) || 0) - r.amount) > Math.max(5, Math.abs(r.amount) * 0.3)) continue;
       close.push({ r, x, gap: Math.abs(day(r.date) - day(x.date)) });
     }
@@ -1429,6 +1431,15 @@ function backOptions(r) {
     + `<option value="income" ${r.cat === 'income' ? 'selected' : ''}>Something new — add it as Additional income</option>`;
 }
 
+// Money out: that month's unpaid "other expenses" (the closest one first, as "Yes").
+function otherOptions(r) {
+  const taken = new Set(S.imp.rows.filter(y => y !== r && (y.cat || '').startsWith('other:')).map(y => y.cat));
+  const items = ((S.months[D.ymOf(r.date)] || {}).other || []).filter(o => !o.paid && !taken.has(`other:${o.id}`));
+  if (!items.length) return '';
+  const guess = items.find(o => o.id === r.otherGuess);
+  return `<optgroup label="Other expenses this month">${(guess ? [guess, ...items.filter(o => o !== guess)] : items).map(o => `<option value="other:${esc(o.id)}" ${r.cat === `other:${o.id}` ? 'selected' : ''}>${o === guess ? 'Yes — ' : ''}${esc(o.name)} (${money(o.amount)})</option>`).join('')}</optgroup>`;
+}
+
 // Transfers in: shared-bill shares still owed that month (closest first, as "Yes").
 const heldPicked = r => (r.cat || '').startsWith('held:') && ((S.months[D.ymOf(r.date)] || {}).held || []).find(h => `held:${h.id}` === r.cat);
 function heldOptions(r) {
@@ -1462,7 +1473,7 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess || r.heldGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : r.transferIn ? `<option value="" ${!r.cat ? 'selected' : ''}>What is it?</option>` : ''}${r.transferIn ? heldOptions(r) : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${r.transferIn ? 'No — my own money moving, skip it' : 'No — skip it'}</option></select></div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess || r.heldGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : r.transferIn ? `<option value="" ${!r.cat ? 'selected' : ''}>What is it?</option>` : ''}${r.transferIn ? heldOptions(r) : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${r.transferIn ? 'Skip it — moving money around' : 'No — skip it'}</option></select></div>
       ${r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>` : ''}
       ${heldPicked(r) ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always match ${esc(r.name)} to ${esc(heldPicked(r).name)}’s share</label>` : ''}
     </div>`;
@@ -1472,11 +1483,12 @@ function impRow(r) {
     const guess = bills.find(b => b.id === r.billGuess);
     const ordered = guess ? [guess, ...bills.filter(b => b !== guess)] : bills;
     const picked = r.cat && r.cat.startsWith('bill:') ? bills.find(b => `bill:${b.id}` === r.cat) : null;
+    const others = otherOptions(r);
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Which bill?"><option value="" ${!r.cat ? 'selected' : ''}>${guess ? 'Is it?' : 'What is it?'}</option><optgroup label="Bills">${ordered.map(b => `<option value="bill:${esc(b.id)}" ${r.cat === `bill:${b.id}` ? 'selected' : ''}>${b === guess ? `Yes — ${esc(b.name)}` : esc(b.name)}</option>`).join('')}</optgroup><optgroup label="Spending">${H().categories.map(c => `<option value="${esc(c.id)}" ${r.cat === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')}</optgroup><option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${guess ? 'No — skip it' : 'Skip it (my own money moving)'}</option></select></div>
-      ${r.cat ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${picked ? `Always match ${esc(r.name)} to ${esc(picked.name)}` : r.cat === 'skip' ? `Always skip ${esc(r.name)}` : `Always put ${esc(r.name)} in ${esc((catById(r.cat) || {}).name || '')}`}</label>` : ''}
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Which bill?"><option value="" ${!r.cat ? 'selected' : ''}>${guess || r.otherGuess ? 'Is it?' : 'What is it?'}</option>${r.otherGuess ? others : ''}<optgroup label="Bills">${ordered.map(b => `<option value="bill:${esc(b.id)}" ${r.cat === `bill:${b.id}` ? 'selected' : ''}>${b === guess ? `Yes — ${esc(b.name)}` : esc(b.name)}</option>`).join('')}</optgroup>${r.otherGuess ? '' : others}<optgroup label="Spending">${H().categories.map(c => `<option value="${esc(c.id)}" ${r.cat === c.id ? 'selected' : ''}>${esc((c.customEmoji ? c.customEmoji + ' ' : '') + c.name)}</option>`).join('')}</optgroup><option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${guess || r.otherGuess ? 'No — skip it' : 'Skip it — moving money around'}</option></select></div>
+      ${r.cat && !r.cat.startsWith('other:') ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> ${picked ? `Always match ${esc(r.name)} to ${esc(picked.name)}` : r.cat === 'skip' ? `Always skip ${esc(r.name)}` : `Always put ${esc(r.name)} in ${esc((catById(r.cat) || {}).name || '')}`}</label>` : ''}
     </div>`;
   }
   if (r.payCandidate) {
@@ -1523,13 +1535,13 @@ function viewImport() {
     ${I.gap ? `<p class="msg small">${esc(I.gap)}</p>` : ''}
   </section>
   <section class="card">
-    <label class="field"><span class="label">Checking balance right now <span class="small muted">(optional)</span></span>
+    <label class="field"><span class="label">Current balance right now <span class="small muted">(optional)</span></span>
       <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" value="${esc(I.bal || '')}"></span></label>
-    <p class="small muted">Fill this in and Checking on Overview is set to it when you save. Leave it blank to keep the app’s estimate.</p>
+    <p class="small muted">Use <b>Current</b>, not Available, from your Navy Federal app. Available already has pending charges taken out, and those aren’t in this file yet. Checking on Overview is set to it when you save; leave it blank to keep the app’s estimate.</p>
   </section>
   ${logged.length ? `<button class="linkish small add-link" data-act="imp-logged">${I.showLogged ? 'Hide' : 'Show'} ${logged.length} already logged ✓</button>${I.showLogged ? logged.map(impRow).join('') : ''}` : ''}
   ${first.length ? `<h2 class="section-title">Needs a look <span class="small muted">${open} left</span></h2>${first.map(impRow).join('')}` : ''}
-  ${rest.length ? `<h2 class="section-title">Ready</h2>${rest.map(impRow).join('')}` : ''}
+  ${rest.length ? `<button class="section-title ready-toggle" data-act="imp-ready" aria-expanded="${!!I.showReady}">Ready <span class="small muted">${rest.length}</span> <i>${I.showReady ? '▾' : '▸'}</i></button>${I.showReady ? rest.map(impRow).join('') : '<p class="small muted">Sorted already — tap to look them over. They save either way.</p>'}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits and payments are skipped).</p>` : ''}
@@ -1541,7 +1553,7 @@ function viewImport() {
 const isMoneyIn = r => r.cat === 'income' || (!!r.cat && r.cat.startsWith('back:'));
 const isShare = r => !!r.cat && r.cat.startsWith('held:');
 // "Money out" questions answered with a bill, skip, or not at all (a category = a purchase).
-const billOrSkip = r => r.billAsk && (!r.cat || r.cat === 'skip' || r.cat.startsWith('bill:'));
+const billOrSkip = r => r.billAsk && (!r.cat || r.cat === 'skip' || r.cat.startsWith('bill:') || r.cat.startsWith('other:'));
 
 async function saveImport() {
   const I = S.imp;
@@ -1553,6 +1565,7 @@ async function saveImport() {
   const pays = [];
   const incomes = [];
   const shares = [];
+  const othersPaid = [];
   let latest = (H().imports || {}).through || '';
   const confirm = [];
   for (const r of I.rows) {
@@ -1578,6 +1591,7 @@ async function saveImport() {
       if (r.remember && r.cat === 'skip') rules[r.ruleKey] = { action: 'skip', name: r.name };
       continue;
     }
+    if (r.cat && r.cat.startsWith('other:')) { othersPaid.push(r); continue; }
     if (billOrSkip(r)) {
       // Picked a bill: it's paid (the bill section below checks it off at the real amount).
       r.billId = r.cat && r.cat.startsWith('bill:') ? r.cat.slice(5) : null;
@@ -1658,6 +1672,16 @@ async function saveImport() {
       list.push({ id: newId(), name: r.name, amount: Math.abs(r.amount), received: true, receivedAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), fromImport: true });
     }
     await B.setMonthField(ym, ['back'], list);
+  }
+  // Other expenses that went out: checked off as paid at the real amount.
+  const otByMonth = {};
+  for (const r of othersPaid) (otByMonth[D.ymOf(r.date)] = otByMonth[D.ymOf(r.date)] || []).push(r);
+  for (const ym in otByMonth) {
+    const list = ((S.months[ym] || {}).other || []).map(o => {
+      const r = otByMonth[ym].find(x => x.cat === `other:${o.id}`);
+      return r ? { ...o, amount: r.amount, paid: true, paidAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()), fromImport: true } : o;
+    });
+    await B.setMonthField(ym, ['other'], list);
   }
   // Shared-bill shares that came in: checked off at the real amount.
   const shByMonth = {};
@@ -3005,6 +3029,7 @@ const acts = {
       ${H().trackMode !== 'import' ? `<button class="btn full" data-act="cat-log" data-cat="${esc(c.id)}">+ Log a purchase</button>` : ''}`);
   },
   'imp-cancel': () => { S.imp = null; },
+  'imp-ready': () => { S.imp.showReady = !S.imp.showReady; render(true); },
   'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
   'imp-untag': el => { const r = S.imp.rows[el.dataset.i]; r.tags = r.tags.filter(t => t !== el.dataset.v); render(true); },
   'imp-split': el => { const r = S.imp.rows[el.dataset.i]; r.splits = [{ amount: r.amount, cat: r.cat && !['skip', 'uncat'].includes(r.cat) ? r.cat : '' }, { amount: 0, cat: '' }]; render(true); },

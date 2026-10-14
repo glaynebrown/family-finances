@@ -108,6 +108,17 @@ const Imp = (() => {
     return null;
   }
 
+  // An unpaid "other expense" that month, closest within 10%.
+  function otherGuess(months, rec) {
+    let best = null;
+    for (const o of (months[D.ymOf(rec.date)] || {}).other || []) {
+      const a = Number(o.amount) || 0;
+      const gap = Math.abs(a - rec.amount);
+      if (!o.paid && a > 0 && gap <= a * 0.1 && (!best || gap < best.gap)) best = { o, gap };
+    }
+    return best;
+  }
+
   // A shared-bill share still owed that month, closest within 10%.
   function heldGuess(months, rec) {
     let best = null;
@@ -224,7 +235,14 @@ const Imp = (() => {
       // (one suggested by amount), spending in a category, or skip. Asked until remembered.
       if (!rec.credit && !isBuy && !(rule0 && (rule0.action === 'cat' || rule0.action === 'ask'))) {
         if (rule0 && rule0.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = rule0.note ? `Skipped — ${rule0.note}` : 'Skipped by your rule'; return row; }
-        return askBill(billByAmount(H, rec, months));
+        // An "other expense" this month within 10% (a card payment, say) beats a bill further off.
+        const bill = billByAmount(H, rec, months);
+        const other = otherGuess(months, rec);
+        if (other && (!bill || other.gap < Math.abs(Calc.billCharge(months[ym], bill, ym) - rec.amount))) {
+          row.otherGuess = other.o.id;
+          return askBill(null, `Is this your ${other.o.name} (${money(other.o.amount)})?`);
+        }
+        return askBill(bill);
       }
       // Transfers in (someone sending a shared-bill share, or your own money moving):
       // a share still owed that month within 10%, Additional income, or skip.
