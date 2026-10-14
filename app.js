@@ -474,12 +474,11 @@ function logHtml() {
     ${L.id ? '' : '<button type="button" class="linkish small" data-act="l-split">Split between categories</button>'}</div>`}
   <div class="field"><span class="label">Store</span><div class="chips">${(H().stores || []).map(s => chip('l-store', s, L.store === s, esc(s))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="stores">+ New</button></div></div>
-  <div class="field"><span class="label">Tags <span class="muted small">(optional — for tracking things like diapers)</span></span><div class="chips">${(H().tags || []).map(t => chip('l-tag', t, L.tags.includes(t), esc(t))).join('')}
+  <div class="field"><span class="label">Tags <span class="muted small">(optional)</span></span><div class="chips">${(H().tags || []).map(t => chip('l-tag', t, L.tags.includes(t), esc(t))).join('')}
     <button type="button" class="chip add" data-act="l-add" data-kind="tags">+ New</button></div></div>
   <div class="field"><span class="label">Date</span>${datePicker('l-date', L.date)}</div>
   <label class="field"><span class="label">Note</span><input id="l-note" placeholder="optional" value="${esc(L.note)}"></label>
-  <div class="field"><span class="label">Bulk buy? Spread it over</span><div class="seg">${[1, 2, 3, 4, 6].map(n => `<button type="button" class="${Number(L.spread) === n ? 'on' : ''}" data-act="l-spread" data-v="${n}">${n === 1 ? 'Just this month' : n + ' months'}</button>`).join('')}</div></div>
-  <div class="row end sheet-foot">${L.id ? '<button class="btn ghost danger" data-act="l-del">Delete</button>' : ''}<button class="btn" data-act="l-save">${L.id ? 'Save' : 'Log it'}</button></div>`;
+  <div class="row end sheet-foot sticky-foot">${L.id ? '<button class="btn ghost danger" data-act="l-del">Delete</button>' : ''}<button class="btn" data-act="l-save">${L.id ? 'Save' : 'Log it'}</button></div>`;
 }
 // One receipt, several categories (Target: diapers for Twins, clothes for Home, groceries).
 // Saved as one purchase per category, tied together so an import matches the whole receipt.
@@ -3011,7 +3010,6 @@ const acts = {
   'l-cat': el => { S.log.cat = el.dataset.v; redrawLog(); },
   'l-store': el => { S.log.store = S.log.store === el.dataset.v ? '' : el.dataset.v; redrawLog(); },
   'l-tag': el => { const t = el.dataset.v; const L = S.log; L.tags = L.tags.includes(t) ? L.tags.filter(x => x !== t) : [...L.tags, t]; redrawLog(); },
-  'l-spread': el => { S.log.spread = Number(el.dataset.v); redrawLog(); },
   'l-add': el => {
     const kind = el.dataset.kind;
     syncLog();

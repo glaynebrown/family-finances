@@ -638,3 +638,6 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .late-note summary::-webkit-details-marker { display: none; }
 .late-note[open] summary { opacity: 1; }
 .info-btn { background: none; border: 0; padding: 2px 4px; margin: -2px -4px; font-size: 1.1rem; line-height: 1; color: var(--muted, inherit); cursor: pointer; opacity: 0.75; }
+/* Log sheet: Log it / Save stays in view at the bottom; the form scrolls behind it. */
+.sticky-foot { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); z-index: 1; background: var(--sheet);
+  padding: 10px 0 calc(18px + env(safe-area-inset-bottom)); margin-bottom: calc(-18px - env(safe-area-inset-bottom)); box-shadow: 0 -8px 12px -10px rgba(0, 0, 0, .25); }

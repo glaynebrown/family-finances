@@ -107,6 +107,14 @@ const Imp = (() => {
     }
     return null;
   }
+  // Name matches a bill but the amount doesn't (a price went up): asked, not guessed.
+  function billByName(H, rec) {
+    const dw = new Set(words(prettyName(rec.desc)));
+    return (H.bills || []).find(b => {
+      const bw = words(b.name).filter(w => !['payment', 'family', '-'].includes(w));
+      return bw.length && bw.every(w => dw.has(w));
+    }) || null;
+  }
 
   // An unpaid "other expense" that month, closest within 10%.
   function otherGuess(months, rec) {
@@ -202,12 +210,18 @@ const Imp = (() => {
       if (moneyIn) {
         const pr = findRule(rules, rkey);
         if (pr && pr.action === 'skip') { row.status = 'skip'; row.cat = 'skip'; row.reason = 'Skipped by your rule'; return row; }
-        const guess = backGuess(months, rec);
         row.incomeAsk = true;
         row.amount = rec.amount;
+        // A shared-bill share sent by Zelle or deposit: same as a transfer in.
+        const owed = ((months[D.ymOf(rec.date)] || {}).held || []).filter(h => !h.received);
+        const ruled = pr && pr.action === 'held' && owed.find(h => h.id === pr.helperId);
+        if (ruled) { row.cat = `held:${ruled.id}`; row.reason = `${ruled.name}’s share (your rule)`; return row; }
+        const share = heldGuess(months, rec);
+        const guess = !share && backGuess(months, rec);
+        row.heldGuess = share ? share.id : '';
         row.backGuess = guess ? guess.id : '';
-        row.cat = guess ? '' : 'income';
-        row.reason = guess ? `Is this your ${guess.name} (${money(guess.amount)})?` : 'Money in — added to Additional income';
+        row.cat = share || guess ? '' : 'income';
+        row.reason = share ? `Is this ${share.name}’s share (${money(share.amount)})?` : guess ? `Is this your ${guess.name} (${money(guess.amount)})?` : 'Money in — added to Additional income';
         return row;
       }
       if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
@@ -230,6 +244,12 @@ const Imp = (() => {
         row.status = 'skip'; row.cat = 'skip'; row.billId = bill0.id; row.charged = rec.amount;
         row.reason = `Matches your ${bill0.name} bill${Math.abs(amt - rec.amount) > 1 ? ` — charged ${money(rec.amount)} (expected ${money(amt)}); this month’s amount will be updated` : ''}`;
         return row;
+      }
+      // A card charge with a bill's name at a different amount (Spotify went up): ask.
+      const named = !rec.credit && !(rule0 && (rule0.action === 'cat' || rule0.action === 'ask')) && billByName(H, rec);
+      if (named) {
+        const amt = Calc.billCharge(months[ym], named, ym);
+        return askBill(named, `Looks like your ${named.name} bill, but it’s ${money(rec.amount)} (usually ${money(amt)}) — is it?`);
       }
       // Any other money out (ACH, "Payment to…", a transfer, a check, a fee): a bill
       // (one suggested by amount), spending in a category, or skip. Asked until remembered.
@@ -267,7 +287,7 @@ const Imp = (() => {
       if (rule && rule.action === 'cat') { row.cat = rule.cat; row.tags = [...(rule.tags || [])]; row.reason = 'From your rule'; return row; }
       const guess = BANK[(rec.bankCat || '').toLowerCase()];
       if (guess && guess.ask) { row.ask = true; row.tags = [...(guess.tags || [])]; row.reason = `${rec.bankCat} — pick a category`; return row; }
-      if (guess) { row.cat = guess.cat; row.tags = [...(guess.tags || [])]; row.reason = `Bank says ${rec.bankCat}`; return row; }
+      if (guess) { row.cat = guess.cat; row.tags = [...(guess.tags || [])]; row.guessed = true; row.reason = `Bank says ${rec.bankCat} — check it`; return row; }
       row.reason = rec.bankCat ? `Bank says ${rec.bankCat}` : 'New store';
       return row;
     });
