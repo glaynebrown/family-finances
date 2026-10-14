@@ -462,7 +462,7 @@ function unexpSheetHtml() {
     ${list.map(p => purchaseRow(p)).join('')}
     ${covers.map(x => { const b = backs.find(y => y.id === x.backId); return `<div class="line small"><span>✓ Covered ${money(x.amount)} from savings${b && b.received ? ' · moved' : ' · move it to checking'}</span>${b && b.received ? '' : `<button class="linkish small" data-act="unexp-undo" data-id="${esc(x.id)}">undo</button>`}</div>`; }).join('')}
     ${left ? `<div class="field"><span class="label">Cover from savings</span>
-      <div class="edit-row"><span class="amount move-amt"><span>$</span><input id="unexp-amt" inputmode="decimal" value="${left}"></span><button class="btn" data-act="unexp-cover">Cover it</button></div>
+      <div class="edit-row cover-row-un"><span class="amount move-amt"><span>$</span><input id="unexp-amt" inputmode="decimal" value="${left}"></span><button class="btn" data-act="unexp-cover">Cover it</button></div>
       <p class="small muted">Lowers Savings now and adds “From savings” to Additional income, so this month’s extra goes back up. Move the money to checking in your bank app — the next import checks it off.</p></div>` : ''}`;
 }
 

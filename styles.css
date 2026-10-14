@@ -656,3 +656,7 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .rule + .rule { border-top: 1px solid var(--line); }
 .rule-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 0 8px; }
 .rule-tags select { width: auto; padding: 4px 8px; font-size: .85rem; }
+.cover-row-un { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; }
+.cover-row-un .amount { flex: 1 1 auto; min-width: 0; }
+.cover-row-un .amount input { min-width: 0; width: 100%; }
+.cover-row-un .btn { flex: none; white-space: nowrap; }
