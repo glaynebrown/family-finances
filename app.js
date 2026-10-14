@@ -445,7 +445,7 @@ function viewHome() {
 function unexpLine(total, M) {
   if (!(total > 0.004)) return '';
   const covered = ((M || {}).unexpCovers || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
-  return `<button class="card unexp-line" data-act="unexp-open"><span class="cat-name">${catBadge('unexp', 26)}<span class="unexp-name">Unexpected <span class="small muted">· from savings/excess</span></span></span><b class="unexp-amt">${money(total)}</b><i>›</i>
+  return `<button class="card unexp-line" data-act="unexp-open"><span class="unexp-top"><span class="cat-name">${catBadge('unexp', 26)}<span class="unexp-name">Unexpected <span class="small muted">· from savings/excess</span></span></span><b class="unexp-amt">${money(total)}</b><i>›</i></span>
     ${covered ? `<span class="small muted unexp-sub">${money(covered)} covered from savings</span>` : ''}</button>`;
 }
 function unexpSheetHtml() {
@@ -2852,9 +2852,11 @@ function viewSettingsSetup() {
     <div class="seg">${[['log', 'Log'], ['import', 'Import'], ['both', 'Both']].map(([k, l]) => `<button class="${(h.trackMode || 'log') === k ? 'on' : ''}" data-act="track" data-v="${k}">${l}</button>`).join('')}</div>
     <p class="small muted">${trackHelp(h.trackMode || 'log')}</p>
     ${Object.keys(h.rules || {}).length ? `<details class="small"><summary>Store rules for imports (${Object.keys(h.rules).length})</summary>
-      ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="edit-row"><span class="grow">${esc(r.name || k)}${r.tags && r.tags.length ? ` <span class="small muted">· ${r.tags.map(esc).join(', ')}</span>` : ''}</span>
-        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}${r.action === 'held' ? (h.helpers || []).map(x => `<option value="held:${esc(x.id)}" ${r.helperId === x.id ? 'selected' : ''}>Share: ${esc(x.name)}</option>`).join('') : ''}${r.action === 'bill' ? (h.bills || []).map(b => `<option value="bill:${esc(b.id)}" ${r.billId === b.id ? 'selected' : ''}>Bill: ${esc(b.name)}</option>`).join('') : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
-        <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>`).join('')}</details>` : ''}
+      ${Object.entries(h.rules).sort((a, b) => (a[1].name || a[0]).localeCompare(b[1].name || b[0])).map(([k, r]) => `<div class="rule"><div class="edit-row"><span class="grow">${esc(r.name || k)}</span>
+        <select data-ch="rule" data-k="${esc(k)}">${h.categories.map(c => `<option value="${esc(c.id)}" ${r.action === 'cat' && r.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="unexp" ${r.action === 'cat' && r.cat === 'unexp' ? 'selected' : ''}>Unexpected</option><option value="ask" ${r.action === 'ask' ? 'selected' : ''}>Ask each time</option>${r.action === 'pay' || payInChecking() ? `<option value="pay" ${r.action === 'pay' ? 'selected' : ''}>Paycheck</option>` : ''}${r.action === 'held' ? (h.helpers || []).map(x => `<option value="held:${esc(x.id)}" ${r.helperId === x.id ? 'selected' : ''}>Share: ${esc(x.name)}</option>`).join('') : ''}${r.action === 'bill' ? (h.bills || []).map(b => `<option value="bill:${esc(b.id)}" ${r.billId === b.id ? 'selected' : ''}>Bill: ${esc(b.name)}</option>`).join('') : ''}<option value="skip" ${r.action === 'skip' ? 'selected' : ''}>Skip</option></select>
+        <button class="x small" data-act="rule-del" data-k="${esc(k)}" aria-label="Remove rule">×</button></div>
+        ${r.action === 'cat' || r.action === 'ask' ? `<div class="rule-tags small"><span class="muted">Tags:</span>${(r.tags || []).map(t => `<span class="tag">${esc(t)} <button class="chip-x" data-act="rule-untag" data-k="${esc(k)}" data-v="${esc(t)}" aria-label="Remove tag">×</button></span>`).join('')}
+          <select data-ch="rule-tag" data-k="${esc(k)}" aria-label="Add a tag"><option value="">+ Tag</option>${(h.tags || []).filter(t => !(r.tags || []).includes(t)).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__new">+ New tag…</option></select></div>` : ''}</div>`).join('')}</details>` : ''}
   </section>
   <section class="card"><h2>Savings goals</h2>
     <div class="three">
@@ -3207,6 +3209,13 @@ const acts = {
       : v === 'both' ? 'Switch to both? Keep logging with + Log, and import every week or so — anything you already logged is matched, not added twice.'
       : 'Switch back to logging only? Imported purchases stay.', 'Switch');
     if (ok) await B.setH([[['trackMode'], v]]);
+  },
+  'rule-untag': async el => {
+    const rules = { ...(H().rules || {}) };
+    const r = rules[el.dataset.k];
+    if (!r) return;
+    rules[el.dataset.k] = { ...r, tags: (r.tags || []).filter(t => t !== el.dataset.v) };
+    await B.setH([[['rules'], rules]]);
   },
   'rule-del': async el => { const rules = { ...(H().rules || {}) }; delete rules[el.dataset.k]; await B.setH([[['rules'], rules]]); },
   page: el => { S.page = el.dataset.v; try { localStorage.setItem('ne-page', S.page); } catch (e) {} window.scrollTo(0, 0); render(); },
@@ -3844,6 +3853,15 @@ const changes = {
     const old = rules[el.dataset.k] || {};
     const v = el.value;
     rules[el.dataset.k] = v === 'skip' ? { ...old, action: 'skip' } : v === 'ask' ? { ...old, action: 'ask' } : v === 'pay' ? { ...old, action: 'pay' } : v.startsWith('bill:') ? { ...old, action: 'bill', billId: v.slice(5) } : v.startsWith('held:') ? { ...old, action: 'held', helperId: v.slice(5) } : { ...old, action: 'cat', cat: v };
+    await B.setH([[['rules'], rules]]);
+  },
+  'rule-tag': async el => {
+    const v = el.value === '__new' ? await newTag() : el.value;
+    el.value = '';
+    const rules = { ...(H().rules || {}) };
+    const r = rules[el.dataset.k];
+    if (!v || !r || (r.tags || []).includes(v)) return;
+    rules[el.dataset.k] = { ...r, tags: [...(r.tags || []), v] };
     await B.setH([[['rules'], rules]]);
   },
   cover: el => { if (S.cover) { S.cover.amt[el.dataset.id] = Math.abs(num(el.value) || 0); refreshCoverSum(); } },
