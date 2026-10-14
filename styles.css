@@ -634,3 +634,7 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 
 .ready-toggle { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; width: 100%; text-align: left; }
 .ready-toggle i { font-style: normal; margin-left: auto; }
+.late-note summary { list-style: none; cursor: pointer; opacity: 0.8; }
+.late-note summary::-webkit-details-marker { display: none; }
+.late-note[open] summary { opacity: 1; }
+.info-btn { background: none; border: 0; padding: 2px 4px; margin: -2px -4px; font-size: 1.1rem; line-height: 1; color: var(--muted, inherit); cursor: pointer; opacity: 0.75; }

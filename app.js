@@ -76,6 +76,13 @@ function ask(text, ok = 'OK', cancel = 'Cancel') {
   });
 }
 
+// Same dialog, just to explain something (one button).
+function info(text) {
+  $('#dialog').innerHTML = `<p>${text}</p><div class="row end"><button class="btn" data-d="1">Got it</button></div>`;
+  $('#dialog-wrap').hidden = false;
+  $('#dialog').onclick = e => { if (e.target.closest('[data-d]')) $('#dialog-wrap').hidden = true; };
+}
+
 // Same dialog with a text box; resolves to the typed text, or null if cancelled.
 function askText(text, placeholder = '', ok = 'Add') {
   return new Promise(res => {
@@ -551,9 +558,16 @@ function billsSections() {
     ? `<p class="small muted">${M.moved >= 0 ? `Moved ${money(M.moved)} to savings` : `Took ${money(-M.moved)} from savings`} when you set up ${D.name(ym)}.${c.excess < -0.004 ? (calm() ? ` Spending is ${money(-c.excess)} past the plan — it’ll come up in review.` : ` Short ${money(-c.excess)}.`) : ''}</p>`
     : '';
   const checking = `<button class="line tap checking-row" data-act="checking" aria-label="Update checking balance"><span><b>Checking</b> <span class="small muted">(updated ${c.checkedAt ? `${new Date(c.checkedAt).getMonth() + 1}/${new Date(c.checkedAt).getDate()}` : '—'})</span></span><b class="val-edit">${money(c.est)}</b></button>`;
+  // Last month's purchases that came out after this month started: already in
+  // Checking, but not in any of this month's budgets -- so they're called out here.
+  const late = S.purchases.filter(p => D.ymOf(p.date) < ym && M.setupAt && (p.t || 0) > M.setupAt && (Number(p.amount) || 0) > 0);
+  const lateTotal = round2(late.reduce((a, p) => a + Number(p.amount), 0));
+  const lateHtml = lateTotal ? `<details class="late-note small"><summary class="line"><span><i class="sign">↳</i>Late ${D.name(D.addMonths(ym, -1))} charges in that</span><span>−${money(lateTotal)}</span></summary>
+      ${late.map(p => `<div class="line small muted"><span>${esc(p.store || (catById(p.cat) || {}).name || 'Purchase')} · ${D.niceDay(p.date)}</span><span>${money(p.amount)}</span></div>`).join('')}
+      <p class="small muted">Bought in ${D.name(D.addMonths(ym, -1))}, came out after you started ${D.name(ym)} — so they lower ${D.name(ym)}’s extra.</p></details>` : '';
   return `
   <section class="card checklist">
-    ${checking}
+    ${checking}${lateHtml}
     ${c.since.length ? `<button class="linkish small" data-act="since">${S.sinceOpen ? 'Hide' : 'What changed since then?'}</button>
       ${S.sinceOpen ? `<div class="since">${c.since.map(s => `<div class="line small"><span>${esc(s.what)}${s.kind ? ` <button class="linkish small" data-act="since-pre" data-kind="${s.kind}" data-id="${esc(s.id)}">already in that balance</button>` : ''}</span><span>${s.amount > 0 ? '+' : ''}${money(s.amount)}</span></div>`).join('')}
         <p class="small muted">Something here was already in the balance you typed? Tap “already in that balance” so it isn’t counted twice. (Anything you check off within an hour of typing a balance is counted as already in it.)</p></div>` : ''}` : ''}
@@ -1289,9 +1303,10 @@ function pickImportFile() {
       }
       await ensureLoaded(D.curYm()).catch(() => {});
       sortRefunds(res.rows);
-      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || (r.incomeAsk && !(r.cat || '').startsWith('held:')));
+      for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || (r.incomeAsk && !(r.cat || '').startsWith('held:')) || r.guessed);
       if (H().trackMode === 'both') matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
+      if (H().trackMode === 'both') S.imp.orphans = findOrphans(res.rows);
       location.hash = '#/import';
     } catch (e) { console.error(e); toast(e.message || 'Couldn’t read that file'); }
   };
@@ -1319,9 +1334,11 @@ function sortRefunds(rows) {
     r.ask = false;
     if (hit) {
       r.cat = hit.cat;
+      r.guessed = true;
       r.reason = `Refund — back to ${catById(hit.cat).name} (last bought there ${D.niceDay(hit.date)})`;
     } else {
       r.cat = 'income';
+      r.guessed = true;
       r.tags = [];
       r.reason = 'Money in — added to Additional income';
     }
@@ -1473,7 +1490,7 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess || r.heldGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : r.transferIn ? `<option value="" ${!r.cat ? 'selected' : ''}>What is it?</option>` : ''}${r.transferIn ? heldOptions(r) : ''}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${r.transferIn ? 'Skip it — moving money around' : 'No — skip it'}</option></select></div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="What is this money?">${r.backGuess || r.heldGuess ? `<option value="" ${!r.cat ? 'selected' : ''}>Is it?</option>` : r.transferIn ? `<option value="" ${!r.cat ? 'selected' : ''}>What is it?</option>` : ''}${heldOptions(r)}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>${r.transferIn ? 'Skip it — moving money around' : 'No — skip it'}</option></select></div>
       ${r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always skip ${esc(r.name)}</label>` : ''}
       ${heldPicked(r) ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always match ${esc(r.name)} to ${esc(heldPicked(r).name)}’s share</label>` : ''}
     </div>`;
@@ -1495,7 +1512,7 @@ function impRow(r) {
     return `<div class="imp-row ${!r.cat ? 'needs' : ''} ${r.cat === 'skip' ? 'skipped' : ''}">
       <div class="row between"><span class="grow"><b>${esc(r.name)}</b> <span class="small muted">${D.niceDay(r.date)}</span></span><b>+${money(r.amount)}</b></div>
       <div class="small muted">${esc(r.reason)}</div>
-      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Paycheck?"><option value="" ${!r.cat ? 'selected' : ''}>Is this a paycheck?</option><option value="pay" ${r.cat === 'pay' ? 'selected' : ''}>Yes — a paycheck</option>${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
+      <div class="imp-ctl"><select data-ch="imp-cat" data-i="${r.i}" aria-label="Paycheck?"><option value="" ${!r.cat ? 'selected' : ''}>Is this a paycheck?</option><option value="pay" ${r.cat === 'pay' ? 'selected' : ''}>Yes — a paycheck</option>${heldOptions(r)}${backOptions(r)}<option value="skip" ${r.cat === 'skip' ? 'selected' : ''}>No — skip it</option></select></div>
       ${r.cat === 'pay' || r.cat === 'skip' ? `<label class="small remember"><input type="checkbox" data-ch="imp-remember" data-i="${r.i}" ${r.remember ? 'checked' : ''}> Always ${r.cat === 'pay' ? 'treat this as a paycheck' : 'skip this'}</label>` : ''}
     </div>`;
   }
@@ -1514,13 +1531,59 @@ function impRow(r) {
   </div>`;
 }
 
+// "Both" mode: purchases logged by hand that this bank file should have but nothing
+// matched (a weird bank name, a big tip, a typo) -- otherwise they'd count twice.
+// Only ones dated inside the file, 3+ days before its last day (time to post).
+function findOrphans(rows) {
+  const dates = rows.map(r => r.date).sort();
+  if (!dates.length) return [];
+  const last = D.dayStr(new Date(new Date(`${dates[dates.length - 1]}T12:00`).getTime() - 3 * 864e5));
+  const claimed = new Set();
+  for (const r of rows) {
+    if (r.matchId) claimed.add(r.matchId);
+    if (r.close) claimed.add(r.close.id);
+    for (const x of r.which || []) claimed.add(x.id);
+  }
+  return S.purchases.filter(x => x.src !== 'import' && !x.bankConfirmed && !x.bankChecked && !x.splitGroup && (Number(x.amount) || 0) > 0
+    && x.date >= dates[0] && x.date <= last && !claimed.has(x.id))
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .map(x => ({ id: x.id, name: loggedName(x), amount: Number(x.amount), date: x.date, pick: '' }));
+}
+// Bank charges it could be: new ones in this file, or ones imported before, within a week.
+function orphanCands(o) {
+  const I = S.imp;
+  const day = d => new Date(`${d}T12:00`).getTime() / 864e5;
+  const taken = new Set(I.orphans.filter(y => y !== o && y.pick).map(y => y.pick));
+  const near = d => Math.abs(day(d) - day(o.date)) <= 7;
+  const fromFile = I.rows.filter(r => r.status === 'review' && r.kind === 'buy' && !r.which && r.amount > 0 && near(r.date))
+    .map(r => ({ v: `row:${r.i}`, name: r.name, amount: r.amount, date: r.date }));
+  const before = S.purchases.filter(p => p.src === 'import' && (Number(p.amount) || 0) > 0 && near(p.date))
+    .map(p => ({ v: `p:${p.id}`, name: p.store || 'Purchase', amount: Number(p.amount), date: p.date, before: true }));
+  return [...fromFile, ...before].filter(c => !taken.has(c.v))
+    .sort((a, b) => Math.abs(a.amount - o.amount) - Math.abs(b.amount - o.amount) || Math.abs(day(a.date) - day(o.date)) - Math.abs(day(b.date) - day(o.date)))
+    .slice(0, 8);
+}
+function orphanRow(o) {
+  const cands = orphanCands(o);
+  return `<div class="imp-row ${!o.pick ? 'needs' : ''}">
+    <div class="row between"><span class="grow"><b>${esc(o.name)}</b> <span class="small muted">${D.niceDay(o.date)}</span></span><b>${money(o.amount)}</b></div>
+    <div class="small muted">You logged this, but couldn’t find it at the bank. Which is it?</div>
+    <div class="imp-ctl"><select data-ch="imp-orphan" data-id="${esc(o.id)}" aria-label="Which is it?"><option value="" ${!o.pick ? 'selected' : ''}>Which is it?</option>
+      ${cands.length ? `<optgroup label="It’s this charge">${cands.map(c => `<option value="${esc(c.v)}" ${o.pick === c.v ? 'selected' : ''}>${esc(c.name)} · ${money(c.amount)} · ${D.niceDay(c.date)}${c.before ? ' (imported before)' : ''}</option>`).join('')}</optgroup>` : ''}
+      <option value="del" ${o.pick === 'del' ? 'selected' : ''}>Delete it — logged by mistake</option><option value="keep" ${o.pick === 'keep' ? 'selected' : ''}>Keep it — it’s right</option></select></div>
+    ${o.pick && o.pick.startsWith('row:') || o.pick && o.pick.startsWith('p:') ? '<div class="small muted">They’ll become one purchase: your category, tags and note, at the bank’s amount and date.</div>' : ''}
+  </div>`;
+}
+
 function viewImport() {
   const I = S.imp;
   if (!I) return `<header class="hero small-hero"><a class="back" href="#/home">‹ Home</a><h1>Import</h1></header>
     <section class="card"><p>Download your joint checking transactions from Navy Federal as a <b>CSV</b> (any date range — overlaps are fine), then pick the file.</p>
     <button class="btn full" data-act="import-file">Choose file</button></section>`;
+  const orphans = I.orphans || [];
+  const merged = new Set(orphans.filter(o => o.pick.startsWith('row:')).map(o => Number(o.pick.slice(4))));
   const logged = I.rows.filter(r => r.status === 'logged');
-  const live = I.rows.filter(r => r.status !== 'dup' && r.status !== 'logged');
+  const live = I.rows.filter(r => r.status !== 'dup' && r.status !== 'logged' && !merged.has(r.i));
   const dups = I.rows.length - live.length - logged.length;
   const review = live.filter(r => r.status === 'review');
   const skipped = live.filter(r => r.status === 'skip');
@@ -1535,13 +1598,13 @@ function viewImport() {
     ${I.gap ? `<p class="msg small">${esc(I.gap)}</p>` : ''}
   </section>
   <section class="card">
-    <label class="field"><span class="label">Current balance right now <span class="small muted">(optional)</span></span>
-      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" value="${esc(I.bal || '')}"></span></label>
-    <p class="small muted">Use <b>Current</b>, not Available, from your Navy Federal app. Available already has pending charges taken out, and those aren’t in this file yet. Checking on Overview is set to it when you save; leave it blank to keep the app’s estimate.</p>
+    <div class="field"><span class="label row between"><span>Current balance <span class="small muted">(optional)</span></span><button class="info-btn" data-act="imp-bal-info" aria-label="Which balance?">ⓘ</button></span>
+      <span class="amount move-amt"><span>$</span><input data-ch="imp-bal" inputmode="decimal" value="${esc(I.bal || '')}" aria-label="Current balance"></span></div>
   </section>
   ${logged.length ? `<button class="linkish small add-link" data-act="imp-logged">${I.showLogged ? 'Hide' : 'Show'} ${logged.length} already logged ✓</button>${I.showLogged ? logged.map(impRow).join('') : ''}` : ''}
+  ${orphans.length ? `<h2 class="section-title">Logged, but not in the bank file</h2>${orphans.map(orphanRow).join('')}` : ''}
   ${first.length ? `<h2 class="section-title">Needs a look <span class="small muted">${open} left</span></h2>${first.map(impRow).join('')}` : ''}
-  ${rest.length ? `<button class="section-title ready-toggle" data-act="imp-ready" aria-expanded="${!!I.showReady}">Ready <span class="small muted">${rest.length}</span> <i>${I.showReady ? '▾' : '▸'}</i></button>${I.showReady ? rest.map(impRow).join('') : '<p class="small muted">Sorted already — tap to look them over. They save either way.</p>'}` : ''}
+  ${rest.length ? `<button class="section-title ready-toggle" data-act="imp-ready" aria-expanded="${!!I.showReady}">Ready <span class="small muted">${rest.length}</span> <i>${I.showReady ? '▾' : '▸'}</i></button>${I.showReady ? rest.map(impRow).join('') : '<p class="small muted">Already sorted — tap to review.</p>'}` : ''}
   ${!review.length ? '<p class="muted center">Nothing new to add from this file.</p>' : ''}
   ${skipped.length ? `<button class="linkish small add-link" data-act="imp-skipped">${I.showSkipped ? 'Hide' : 'Show'} ${skipped.length} skipped</button>${I.showSkipped ? skipped.map(impRow).join('') : ''}` : ''}
   ${open ? `<p class="small muted center">${open} without a category will go to Uncategorized (Venmo and unanswered deposits and payments are skipped).</p>` : ''}
@@ -1573,6 +1636,13 @@ async function saveImport() {
     const ym = D.ymOf(r.date);
     (keysByMonth[ym] = keysByMonth[ym] || []).push(r.key);
     if (r.post && r.post > latest) latest = r.post;
+    // Picked for a logged purchase the bank didn't match: one purchase, at the bank's amount and date.
+    const orphan = (I.orphans || []).find(o => o.pick === `row:${r.i}`);
+    if (orphan) {
+      const x = S.purchases.find(p => p.id === orphan.id);
+      if (x) { const { part, ...rest } = x; confirm.push({ ...rest, amount: r.amount, date: r.date, until: untilOf({ ...rest, date: r.date }), bankConfirmed: true }); }
+      continue;
+    }
     // Already logged by hand: mark it bank-confirmed (and fix the amount if it changed).
     const picked = r.which && r.pick !== 'new' ? r.pick : null;
     if (r.status === 'logged' || (r.close && r.closeSame) || picked) {
@@ -1625,6 +1695,21 @@ async function saveImport() {
   }
   if (purchases.length) await B.savePurchases(purchases);
   for (const p of confirm) await B.savePurchase(p);
+  // Logged purchases the bank didn't match: merged into one imported before, deleted, or kept.
+  const gone = [];
+  for (const o of I.orphans || []) {
+    const x = S.purchases.find(p => p.id === o.id);
+    if (!x || !o.pick || o.pick.startsWith('row:')) continue;
+    const { part, ...rest } = x;
+    if (o.pick === 'keep') { await B.savePurchase({ ...rest, bankChecked: true }); continue; }
+    if (o.pick.startsWith('p:')) {
+      const b = S.purchases.find(p => p.id === o.pick.slice(2));
+      if (b) { const { part: _, ...bank } = b; await B.savePurchase({ ...bank, store: x.store || bank.store, cat: x.cat, tags: [...(x.tags || [])], note: x.note || bank.note || '', bankConfirmed: true }); }
+    }
+    await B.deletePurchase(x.id);
+    gone.push(x.id);
+  }
+  if (gone.length) { S.older = S.older.filter(p => !gone.includes(p.id)); mergePurchases(); }
   // Bills that came through at a different amount: use the real charge for that month.
   const billHits = {};
   const billPosted = {};
@@ -1811,6 +1896,7 @@ function viewSetup() {
     body = `<h2>Checking balance</h2><p class="muted">What does joint checking show right now?</p>
       <label class="amount"><span>$</span><input id="d-checking" inputmode="decimal" placeholder="${est}" value="${esc(d.checking)}"></label>
       <p class="small muted">The app’s estimate is ${money(est)}.</p>
+      <p class="small muted">Anything from ${D.name(D.addMonths(N, -1))} still pending in your bank app? It’ll come out after you start ${D.name(N)} and lower ${D.name(N)}’s extra (it shows under Checking as a late charge), so leave a little room for it.</p>
       ${(H().bills || []).some(b => D.dueTime(N, b.day) > Date.now()) ? `<h3>${D.name(N)} bills</h3><p class="small muted">Any already taken out of that balance (drafted early)? Tap “already came out” so they aren’t counted twice.</p>
         ${(H().bills || []).filter(b => D.dueTime(N, b.day) > Date.now()).map(b => preBillRow(b, N, (d.pre || {})[b.id], 'd-pre')).join('')}` : ''}`;
   } else if (d.step === 2) {
@@ -3029,6 +3115,7 @@ const acts = {
       ${H().trackMode !== 'import' ? `<button class="btn full" data-act="cat-log" data-cat="${esc(c.id)}">+ Log a purchase</button>` : ''}`);
   },
   'imp-cancel': () => { S.imp = null; },
+  'imp-bal-info': () => info('Use <b>Current</b>, not Available, from your Navy Federal app. Available already has pending charges taken out, and those aren’t in this file yet. Leave it blank to keep the app’s estimate.'),
   'imp-ready': () => { S.imp.showReady = !S.imp.showReady; render(true); },
   'imp-skipped': () => { S.imp.showSkipped = !S.imp.showSkipped; render(true); },
   'imp-untag': el => { const r = S.imp.rows[el.dataset.i]; r.tags = r.tags.filter(t => t !== el.dataset.v); render(true); },
@@ -3687,6 +3774,7 @@ const changes = {
     for (const y of S.imp.rows) if (y.which && !y.pick && y.which.every(x => picked.has(x.id))) y.pick = 'new';
     render(true);
   },
+  'imp-orphan': el => { const o = S.imp.orphans.find(x => x.id === el.dataset.id); if (o) o.pick = el.value; render(true); },
   'imp-bal': el => { S.imp.bal = el.value; },
   'imp-remember': el => { S.imp.rows[el.dataset.i].remember = el.checked; },
   'l-split-amt': el => { const L = S.log; Object.assign(L.splits[el.dataset.j], { amount: num(el.value) || 0, touched: true }); splitFill(logSplitRow(L)); redrawLog(); },
