@@ -648,3 +648,7 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .unexp-line .cat-name { font-weight: 600; flex: 1; min-width: 0; }
 .unexp-line > i { font-style: normal; opacity: .5; }
 .unexp-sub { flex-basis: 100%; padding-left: 34px; }
+.unexp-set { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); align-items: center; }
+.unexp-line .unexp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unexp-line .unexp-name .small { font-weight: 400; }
+.unexp-line .unexp-amt { white-space: nowrap; }

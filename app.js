@@ -29,7 +29,13 @@ const calm = () => !H() || !H().look || H().look.calm !== false;
 const homeYm = () => Calc.homeMonth(S.months);
 // "Unexpected" isn't a budget, but it shows like a category everywhere (name, icon, color).
 const UNEXP = { id: 'unexp', name: 'Unexpected', icon: 'bolt' };
-const catById = id => (id === 'unexp' ? UNEXP : (H().categories || []).find(c => c.id === id));
+// Its icon/color can be changed in Settings → Categories (saved as H.unexpLook).
+const catById = id => (id === 'unexp' ? { ...UNEXP, ...(H().unexpLook || {}) } : (H().categories || []).find(c => c.id === id));
+// Change one category's look (icon, color, emoji) -- or Unexpected's.
+async function patchCat(id, fn) {
+  if (id === 'unexp') { await B.setH([[['unexpLook'], fn({ ...(H().unexpLook || {}) })]]); return; }
+  await B.setH([[['categories'], H().categories.map(c => (c.id === id ? fn(c) : c))]]);
+}
 const feat = k => ((H() && H().features) || {})[k];
 const checkingBuffer = () => { const b = ((H() && H().savings) || {}).buffer; return b === undefined || b === null ? 500 : Number(b) || 0; };
 const bucketsOn = () => !!feat('buckets');
@@ -439,7 +445,7 @@ function viewHome() {
 function unexpLine(total, M) {
   if (!(total > 0.004)) return '';
   const covered = ((M || {}).unexpCovers || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
-  return `<button class="card unexp-line" data-act="unexp-open"><span class="cat-name">${catBadge('unexp', 26)}<span>Unexpected: ${money(total)} · from savings/excess</span></span><i>›</i>
+  return `<button class="card unexp-line" data-act="unexp-open"><span class="cat-name">${catBadge('unexp', 26)}<span class="unexp-name">Unexpected <span class="small muted">· from savings/excess</span></span></span><b class="unexp-amt">${money(total)}</b><i>›</i>
     ${covered ? `<span class="small muted unexp-sub">${money(covered)} covered from savings</span>` : ''}</button>`;
 }
 function unexpSheetHtml() {
@@ -1044,7 +1050,7 @@ const PIE_N = 10, PIE_ALL = 14;
 function catColor(key) {
   const cats = H().categories || [];
   const i = cats.findIndex(c => c.id === key);
-  if (key === 'unexp') return 'var(--pie-unexp)';
+  if (key === 'unexp') { const n = (H().unexpLook || {}).color; return Number.isInteger(n) && n >= 0 && n < PIE_ALL ? `var(--pie-${n})` : 'var(--pie-unexp)'; }
   if (i < 0) return 'var(--pie-none)';
   const pick = cats[i].color;
   return `var(--pie-${Number.isInteger(pick) && pick >= 0 && pick < PIE_ALL ? pick : i % PIE_N})`;
@@ -2781,7 +2787,9 @@ function catsEditHtml(intro = true) {
       <button class="x small" data-act="cat-up" data-id="${esc(c.id)}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
       <button class="x small" data-act="cat-del" data-id="${esc(c.id)}" aria-label="Remove">×</button></div>`).join('')}
     <div class="line subtotal"><span>Categories total</span><b>${money(h.categories.reduce((a, c) => a + (Number(c.budget) || 0), 0))}</b></div>
-    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>`;
+    <div class="add-row"><input id="cat-name" placeholder="New category"><input id="cat-amt" inputmode="decimal" placeholder="$"><button class="btn small" data-act="cat-add">Add</button></div>
+    <div class="edit-row unexp-set"><button class="cat-ic-btn" data-act="cat-icon" data-id="unexp" aria-label="Icon for Unexpected">${catBadge('unexp', 34)}</button>
+      <span class="grow">Unexpected <span class="small muted">· not a budget, comes from savings/excess</span></span></div>`;
 }
 function billsEditHtml(intro = true) {
   const h = H();
@@ -3597,12 +3605,14 @@ const acts = {
   'cat-icon': el => {
     const c = catById(el.dataset.id);
     if (!c) return;
-    const cur = c.icon && CAT_ICONS[c.icon] ? c.icon : '';
-    const auto = catIconKey({ ...c, icon: '' });
+    const un = c.id === 'unexp';
+    const look = un ? (H().unexpLook || {}) : c;
+    const cur = look.icon && CAT_ICONS[look.icon] ? look.icon : '';
+    const auto = un ? UNEXP.icon : catIconKey({ ...c, icon: '' });
     S.sheet = 'soft';
     const ce = c.customEmoji || '';
-    const autoColor = (H().categories.findIndex(x => x.id === c.id)) % PIE_N;
-    const curColor = Number.isInteger(c.color) ? c.color : -1;
+    const autoColor = un ? 'unexp' : (H().categories.findIndex(x => x.id === c.id)) % PIE_N;
+    const curColor = Number.isInteger(look.color) ? look.color : -1;
     openSheet(`<div class="sheet-head"><h2>Icon & color</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
       <p class="small muted">Shows everywhere ${esc(c.name)} appears.</p>
       <span class="label">Color</span>
@@ -3619,22 +3629,12 @@ const acts = {
   },
   'cat-icon-pick': async el => {
     const v = el.dataset.v;
-    const cats = H().categories.map(c => {
-      if (c.id !== el.dataset.id) return c;
-      const { icon, customEmoji, ...rest } = c;
-      return v ? { ...rest, icon: v } : rest;
-    });
     closeSheet();
-    await B.setH([[['categories'], cats]]);
+    await patchCat(el.dataset.id, c => { const { icon, customEmoji, ...rest } = c; return v ? { ...rest, icon: v } : rest; });
   },
   'cat-color': async el => {
     const v = el.dataset.v;
-    const cats = H().categories.map(c => {
-      if (c.id !== el.dataset.id) return c;
-      const { color, ...rest } = c;
-      return v === '' ? rest : { ...rest, color: Number(v) };
-    });
-    await B.setH([[['categories'], cats]]);
+    await patchCat(el.dataset.id, c => { const { color, ...rest } = c; return v === '' ? rest : { ...rest, color: Number(v) }; });
     // Redraw the sheet in the new color once the saved change has come back
     const want = v === '' ? undefined : Number(v);
     for (let i = 0; i < 20 && (catById(el.dataset.id) || {}).color !== want; i++) await new Promise(r => setTimeout(r, 50));
@@ -3642,13 +3642,8 @@ const acts = {
   },
   'cat-ce-save': async el => {
     const v = ($('#cat-ce').value || '').trim();
-    const cats = H().categories.map(c => {
-      if (c.id !== el.dataset.id) return c;
-      const { customEmoji, ...rest } = c;
-      return v ? { ...rest, customEmoji: [...v].slice(0, 8).join('') } : rest;
-    });
     closeSheet();
-    await B.setH([[['categories'], cats]]);
+    await patchCat(el.dataset.id, c => { const { customEmoji, ...rest } = c; return v ? { ...rest, customEmoji: [...v].slice(0, 8).join('') } : rest; });
   },
   'cat-up': async el => {
     const cats = [...H().categories];
