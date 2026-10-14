@@ -428,7 +428,6 @@ function viewHome() {
   ${overviewOn() && S.page === 'overview' ? billsSections() : `
   <div class="spend-sum">
     <div><b>${money(Math.max(0, totalB - totalU))}</b> <span class="muted">left to spend</span> <span class="muted small">/ ${money(totalB)}</span></div>
-    ${c.uncat > 0.004 ? `<div class="small muted"><button class="linkish small uncat-jump" data-act="to-uncat">${money(c.uncat)} uncategorized</button> — taken from Savings/Excess until you pick a category.</div>` : ''}
     ${['import', 'both'].includes(H().trackMode) ? `<div class="small muted">${(H().imports || {}).through ? `${H().trackMode === 'both' ? 'Last import through' : 'Updated through'} ${D.niceDay(H().imports.through)}` : 'No imports yet'}</div>` : ''}
   </div>
   <section class="cats">${c.cats.map(catCard).join('')}</section>
@@ -467,7 +466,7 @@ function uncatCard(spent) {
   if (!list.length) return '';
   const total = list.reduce((a, p) => a + p.part, 0);
   return `<section class="card uncat-card"><div class="row between"><h2>Uncategorized</h2><b>${money(total)}</b></div>
-    <p class="small muted">Tap one to pick a category. Until then, these are taken from Savings/Excess.</p>
+    <p class="small muted">Tap one to pick a category. Until then, these are taken from this month’s savings/excess.</p>
     ${list.map(p => purchaseRow(p)).join('')}</section>`;
 }
 
@@ -3152,7 +3151,6 @@ const acts = {
     await B.setMonthField(ym, ['unexpCovers'], (M.unexpCovers || []).filter(y => y.id !== x.id));
     toast('Undone');
   },
-  'to-uncat': () => { const c = $('.uncat-card'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   since: () => { S.sinceOpen = !S.sinceOpen; render(); },
   eye: () => { S.hideDone = !S.hideDone; try { localStorage.setItem('ne-hide', S.hideDone ? '1' : '0'); } catch (e) {} render(); },
   'import-file': () => pickImportFile(),
