@@ -254,6 +254,19 @@ const Calc = (() => {
     // The setup transfer only comes off a balance typed before it happened.
     if (M.moved && (M.movedAt || M.setupAt || 0) > at) { est -= M.moved; since.push({ what: M.moved > 0 ? 'Moved to savings' : 'Taken from savings', amount: -M.moved }); }
 
+    // Last month's charges still pending when this month started: held back so this
+    // month's extra doesn't pay for them. Once one posts (seen at the bank), the hold
+    // goes and it comes out of checking instead -- the extra doesn't move.
+    let pendingHold = 0;
+    for (const x of M.pendingPrev || []) {
+      const p = x.pid ? purchases.find(q => q.id === x.pid) : null;
+      if (x.pid && !p) continue; // deleted
+      const amt = p ? Number(p.amount) || 0 : Number(x.amount) || 0;
+      if (p && (p.bankConfirmed || p.postedAt)) {
+        if ((p.postedAt || 0) > at) { est -= amt; since.push({ what: `${p.store || x.name || 'Purchase'} (pending from before)`, amount: -amt }); }
+      } else pendingHold += amt;
+    }
+
     const s = spent(purchases, ym);
     let budgetsLeft = 0;
     const cats = (H.categories || []).map(c => {
@@ -269,10 +282,10 @@ const Calc = (() => {
     // "Unexpected" (a lab bill, a license renewal) works the same way, but it's sorted -- not a to-do.
     const uncat = round2(Object.keys(s.cat).filter(k => !ids.has(k) && k !== 'unexp').reduce((a, k) => a + s.cat[k], 0));
     const unexp = round2(s.cat.unexp || 0);
-    const excess = round2(est + backIn + owed - heldBack - nextPay - billsLeft - otherLeft - budgetsLeft);
+    const excess = round2(est + backIn + owed - heldBack - nextPay - pendingHold - billsLeft - otherLeft - budgetsLeft);
     return {
       checking: round2(snap.amount), checkedAt: at, est: round2(est), since,
-      backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), nextPay: round2(nextPay), billsLeft: round2(billsLeft),
+      backIn: round2(backIn), owed: round2(owed), heldBack: round2(heldBack), nextPay: round2(nextPay), pendingHold: round2(pendingHold), billsLeft: round2(billsLeft),
       otherLeft: round2(otherLeft), budgetsLeft: round2(budgetsLeft), excess, bills, cats, spent: s, uncat, unexp,
     };
   }

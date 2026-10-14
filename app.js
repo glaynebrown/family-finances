@@ -594,9 +594,9 @@ function billsSections() {
   // Checking, but not in any of this month's budgets -- so they're called out here.
   const late = S.purchases.filter(p => D.ymOf(p.date) < ym && M.setupAt && (p.t || 0) > M.setupAt && (Number(p.amount) || 0) > 0);
   const lateTotal = round2(late.reduce((a, p) => a + Number(p.amount), 0));
-  const lateHtml = lateTotal ? `<details class="late-note small"><summary class="line"><span><i class="sign">↳</i>Late ${D.name(D.addMonths(ym, -1))} charges in that</span><span>−${money(lateTotal)}</span></summary>
+  const lateHtml = lateTotal ? `<details class="late-note small"><summary class="line"><span><i class="sign">↳</i>Posted late from ${D.name(D.addMonths(ym, -1))}</span><span>−${money(lateTotal)}</span></summary>
       ${late.map(p => `<div class="line small muted"><span>${esc(p.store || (catById(p.cat) || {}).name || 'Purchase')} · ${D.niceDay(p.date)}</span><span>${money(p.amount)}</span></div>`).join('')}
-      <p class="small muted">Bought in ${D.name(D.addMonths(ym, -1))}, came out after you started ${D.name(ym)} — so they lower ${D.name(ym)}’s extra.</p></details>` : '';
+      <p class="small muted">Bought in ${D.name(D.addMonths(ym, -1))}, came out after you started ${D.name(ym)}, and weren’t on your “Still pending” list — so they lower ${D.name(ym)}’s extra.</p></details>` : '';
   return `
   <section class="card checklist">
     ${checking}${lateHtml}
@@ -607,6 +607,7 @@ function billsSections() {
     ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
     ${c.nextPay ? line('−', 'Set aside for next month (paychecks)', c.nextPay) : ''}
+    ${c.pendingHold ? line('−', `Still pending from ${D.name(D.addMonths(ym, -1))}`, c.pendingHold) : ''}
     ${line('−', 'Bills still to come', c.billsLeft)}
     ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
     ${line('−', 'Budget left to spend', c.budgetsLeft)}
@@ -1338,7 +1339,7 @@ function pickImportFile() {
       await ensureLoaded(D.curYm()).catch(() => {});
       sortRefunds(res.rows);
       for (const r of res.rows) r.firstNeeds =r.status === 'review' && (!r.cat || r.ask || r.venmo || (r.payCandidate && r.reason.endsWith('?')) || (r.incomeAsk && !(r.cat || '').startsWith('held:')) || r.guessed);
-      if (H().trackMode === 'both') matchLogged(res.rows);
+      if (H().trackMode === 'both' || S.purchases.some(p => p.pendingAdd && !p.bankConfirmed)) matchLogged(res.rows);
       S.imp = { name: file.name, rows: res.rows, from: res.from, through: res.through, gap, showSkipped: false };
       if (H().trackMode === 'both') S.imp.orphans = findOrphans(res.rows);
       location.hash = '#/import';
@@ -1675,7 +1676,7 @@ async function saveImport() {
     const orphan = (I.orphans || []).find(o => o.pick === `row:${r.i}`);
     if (orphan) {
       const x = S.purchases.find(p => p.id === orphan.id);
-      if (x) { const { part, ...rest } = x; confirm.push({ ...rest, amount: r.amount, date: r.date, until: untilOf({ ...rest, date: r.date }), bankConfirmed: true }); }
+      if (x) { const { part, ...rest } = x; confirm.push({ ...rest, amount: r.amount, date: r.date, until: untilOf({ ...rest, date: r.date }), bankConfirmed: true, postedAt: Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime()) }); }
       continue;
     }
     // Already logged by hand: mark it bank-confirmed (and fix the amount if it changed).
@@ -1683,7 +1684,8 @@ async function saveImport() {
     if (r.status === 'logged' || (r.close && r.closeSame) || picked) {
       const id = r.matchId || picked || r.close.id;
       const hits = String(id).startsWith('g:') ? S.purchases.filter(x => `g:${x.splitGroup}` === id) : S.purchases.filter(x => x.id === id);
-      for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, ...(r.close ? { amount: r.amount } : {}) }); }
+      const postedAt = Math.min(now, new Date(`${r.post || r.date}T12:00`).getTime());
+      for (const p of hits) { const { part, ...rest } = p; confirm.push({ ...rest, bankConfirmed: true, postedAt, ...(r.close ? { amount: r.amount } : {}) }); }
       continue;
     }
     if (isMoneyIn(r)) { incomes.push(r); continue; }
@@ -1876,6 +1878,14 @@ function startDraft(mode = 'start') {
     d.incoming = MN && (MN.setup || MN.planned) && MN.incoming ? MN.incoming.map(x => ({ ...x }))
       : [{ id: newId(), name: 'Paycheck 1', amount: half, received: false }, { id: newId(), name: 'Paycheck 2', amount: round2(monthly - half), received: false }];
   }
+  // Last month's charges not at the bank yet (logged by hand, no ✓ bank) -- held back at start.
+  if (mode === 'start') {
+    d.pending = MN && MN.setup && MN.pendingPrev
+      ? MN.pendingPrev.map(x => ({ ...x, on: true }))
+      : S.purchases.filter(p => D.ymOf(p.date) === R && p.src !== 'import' && !p.bankConfirmed && (Number(p.amount) || 0) > 0)
+        .sort((a, b) => (a.date < b.date ? -1 : 1))
+        .map(p => ({ id: newId(), pid: p.id, name: p.store || (catById(p.cat) || {}).name || 'Purchase', amount: Number(p.amount), date: p.date, on: true }));
+  }
   d.seq = mode === 'plan' ? [2, 3, 4] : d.planned ? [0, 1, 2, 5] : [0, 1, 2, 3, 4, 5];
   d.pos = 0;
   d.step = d.seq[0];
@@ -1889,6 +1899,7 @@ function draftMonth(d) {
   return {
     setup: true, budgets: d.budgets, checking: { amount: num(d.checking) !== null ? num(d.checking) : estChecking(), at: Date.now() }, bills: preBills(d.pre || {}, d.ym),
     other: d.other, back: d.back, held: d.held, moved: null, ...(d.incoming ? { incoming: d.incoming } : {}),
+    ...(d.pending ? { pendingPrev: d.pending.filter(x => x.on).map(({ id, pid, name, amount, date }) => ({ id, pid: pid || null, name, amount, date: date || null })) } : {}),
   };
 }
 
@@ -1928,10 +1939,10 @@ function viewSetup() {
   } else if (d.step === 1) {
     const cur = homeYm();
     const est = Calc.checklist(H(), S.months[cur], cur, S.purchases).est;
-    body = `<h2>Checking balance</h2><p class="muted">What does joint checking show right now?</p>
+    body = `<h2>Checking balance</h2><p class="muted">What does joint checking show right now? Use <b>Current</b>, not Available.</p>
       <label class="amount"><span>$</span><input id="d-checking" inputmode="decimal" placeholder="${est}" value="${esc(d.checking)}"></label>
       <p class="small muted">The app’s estimate is ${money(est)}.</p>
-      <p class="small muted">Anything from ${D.name(D.addMonths(N, -1))} still pending in your bank app? It’ll come out after you start ${D.name(N)} and lower ${D.name(N)}’s extra (it shows under Checking as a late charge), so leave a little room for it.</p>
+      ${pendingStepHtml(d, N)}
       ${(H().bills || []).some(b => D.dueTime(N, b.day) > Date.now()) ? `<h3>${D.name(N)} bills</h3><p class="small muted">Any already taken out of that balance (drafted early)? Tap “already came out” so they aren’t counted twice.</p>
         ${(H().bills || []).filter(b => D.dueTime(N, b.day) > Date.now()).map(b => preBillRow(b, N, (d.pre || {})[b.id], 'd-pre')).join('')}` : ''}`;
   } else if (d.step === 2) {
@@ -1976,6 +1987,7 @@ function viewSetup() {
       ${c.owed ? line('+', 'Still owed for shared bills', c.owed) : ''}
     ${c.heldBack ? line('−', 'Held for shared bills (theirs)', c.heldBack) : ''}
     ${c.nextPay ? line('−', 'Set aside for next month (paychecks)', c.nextPay) : ''}
+      ${c.pendingHold ? line('−', `Still pending from ${D.name(D.addMonths(N, -1))}`, c.pendingHold) : ''}
       ${line('−', `${D.name(N)} bills still to come`, c.billsLeft)}
       ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
       ${line('−', 'Budgets', c.budgetsLeft)}
@@ -1992,6 +2004,24 @@ function viewSetup() {
 
 // A bill not due yet that already came out of checking (drafted early, or set up the night
 // before): marked so it's neither "still to come" nor subtracted again on its due date.
+// Start month → Checking: last month's charges that haven't come out yet.
+function pendingStepHtml(d, N) {
+  const R = D.addMonths(N, -1);
+  const list = d.pending || [];
+  const first = `${R}-01`;
+  const last = `${R}-${D.pad(D.daysIn(R))}`;
+  return `<h3>Still pending from ${D.name(R)}</h3>
+    <p class="small muted">${D.name(R)} charges that haven’t come out of checking yet (look at your bank app’s pending list). They’re held back so ${D.name(N)}’s extra doesn’t pay for them.</p>
+    ${list.map(x => `<div class="check-row ${x.on ? '' : 'done'}"><button class="box ${x.on ? 'on' : ''}" data-act="d-pend" data-id="${esc(x.id)}" aria-label="Still pending">${x.on ? '✓' : ''}</button>
+      <span class="grow">${esc(x.name)} <span class="small muted">${x.date ? D.niceDay(x.date) : ''}${x.pid ? '' : ' · added here'}</span></span><b>${money(x.amount)}</b>
+      ${x.isNew ? `<button class="x small" data-act="d-pend-del" data-id="${esc(x.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('')}
+    ${list.length ? '<p class="small muted">Uncheck any that already came out.</p>' : ''}
+    ${d.pendAdding ? `<div class="pend-add"><div class="edit-row"><input id="pd-name" class="grow" placeholder="Store"><input id="pd-amt" class="mini" inputmode="decimal" placeholder="$"></div>
+      <div class="edit-row"><select id="pd-cat" aria-label="Category">${catOptions('', false)}</select><input id="pd-date" type="date" min="${first}" max="${last}" value="${last}" aria-label="Date"></div>
+      <div class="row end"><button class="btn small" data-act="d-pend-add">Add</button></div></div>`
+      : `<button class="linkish small" data-act="d-pend-open">+ Add a pending charge</button>`}`;
+}
+
 function preBillRow(b, ym, on, act) {
   const due = D.dueTime(ym, b.day) <= Date.now();
   return `<div class="line pre-bill"><span>${D.ordinal(b.day)} · ${esc(b.name)}${due ? ' <span class="small muted">already out</span>' : ''}</span><span class="row gap">${due ? '' : `<button class="share ${on ? 'on' : ''}" data-act="${act}" data-id="${esc(b.id)}" aria-pressed="${!!on}">${on ? '✓' : '○'} already came out</button>`}<b>${money(Calc.billAmount(b, ym))}</b></span></div>`;
@@ -2059,6 +2089,13 @@ async function finishSetup(mode) {
   const nv = x => (num(x) === null ? B.DEL : num(x));
   for (const e of Calc.earners(H())) pairs.push([['plans', N, e.id], nv(d.pay[e.id])]);
   if (!plans[R] || plans[R].endBalance === undefined) pairs.push([['plans', R, 'endBalance'], actual]);
+  // Pending charges added at setup become last month's purchases (so they use its budgets).
+  for (const x of (d.pending || []).filter(y => y.on && y.isNew)) {
+    const pid = await B.savePurchase({ store: x.name, amount: x.amount, cat: x.cat || 'uncat', tags: [], note: '', date: x.date, spread: 1,
+      by: me(), byName: myName(), t: new Date(`${x.date}T12:00`).getTime(), until: D.ymOf(x.date), pendingAdd: true });
+    const e = (M.pendingPrev || []).find(y => y.id === x.id);
+    if (e) e.pid = pid;
+  }
   await B.setMonth(N, M);
   await B.setMonthField(N, ['bills'], M.bills);
   await B.setH(pairs);
@@ -3596,6 +3633,21 @@ const acts = {
     render(true);
   },
   'ny-uc-del': el => { readNYInputs(); S.ny.usualChanges = S.ny.usualChanges.filter(c => c.id !== el.dataset.id); render(true); },
+  'd-pend': el => { readDraftInputs(); const x = (S.draft.pending || []).find(y => y.id === el.dataset.id); if (x) x.on = !x.on; render(true); },
+  'd-pend-del': el => { readDraftInputs(); S.draft.pending = S.draft.pending.filter(y => y.id !== el.dataset.id); render(true); },
+  'd-pend-open': () => { readDraftInputs(); S.draft.pendAdding = true; render(true); },
+  'd-pend-add': () => {
+    readDraftInputs();
+    const d = S.draft;
+    const name = $('#pd-name').value.trim();
+    const amount = Math.abs(num($('#pd-amt').value) || 0);
+    if (!name || !amount) { toast('Add a store and amount'); return; }
+    const R = D.addMonths(d.ym, -1);
+    const date = $('#pd-date').value && D.ymOf($('#pd-date').value) === R ? $('#pd-date').value : `${R}-${D.pad(D.daysIn(R))}`;
+    d.pending = [...(d.pending || []), { id: newId(), name, amount, cat: $('#pd-cat').value || 'uncat', date, on: true, isNew: true }];
+    d.pendAdding = false;
+    render(true);
+  },
   'd-pre': el => { readDraftInputs(); const d = S.draft; d.pre = d.pre || {}; d.pre[el.dataset.id] = !d.pre[el.dataset.id]; render(true); },
   'wz-pre': el => { const c = $('#wz-checking'); if (c) S.wz.checking = c.value; S.wz.pre = S.wz.pre || {}; S.wz.pre[el.dataset.id] = !S.wz.pre[el.dataset.id]; render(true); },
   'd-showmove': () => { readDraftInputs(); S.draft.showMove = true; render(); },
