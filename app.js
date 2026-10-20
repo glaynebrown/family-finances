@@ -441,6 +441,28 @@ function viewHome() {
   ${uncatCard(c.spent)}`}`;
 }
 
+// Tap Savings/Excess: move money between savings and checking (S.xfer = { dir, amt }).
+function xferHtml() {
+  const ym = homeYm();
+  const c = Calc.checklist(H(), S.months[ym], ym, S.purchases);
+  const X = S.xfer;
+  const sv = Number((H().savings || {}).actual) || 0;
+  return `<div class="sheet-head"><h2>Move money</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+    <div class="line total-line ${c.excess < -0.004 ? 'neg' : ''}"><span>Savings/Excess</span><b>${money(c.excess)}</b></div>
+    <div class="seg">${[['in', 'From savings → checking'], ['out', 'Checking → savings']].map(([k, l]) => `<button type="button" class="${X.dir === k ? 'on' : ''}" data-act="xfer-dir" data-v="${k}">${l}</button>`).join('')}</div>
+    <label class="amount move-amt"><span>$</span><input id="xfer-amt" inputmode="decimal" placeholder="0.00" value="${esc(X.amt)}"></label>
+    <p class="small muted">Savings right now: ${money(sv)}</p>
+    <button class="btn full" data-act="xfer-go">Transfer</button>
+    <p class="small muted center">Make sure to transfer it in your bank account too.</p>`;
+}
+function openXfer() {
+  const ym = homeYm();
+  const ex = Calc.checklist(H(), S.months[ym], ym, S.purchases).excess;
+  S.xfer = { dir: 'in', amt: ex < -0.004 ? String(round2(-ex)) : '' };
+  S.sheet = 'xfer';
+  openSheet(xferHtml());
+}
+
 // Unexpected-but-necessary spending: outside the budgets, out of this month's extra.
 function unexpLine(total, M) {
   if (!(total > 0.004)) return '';
@@ -611,7 +633,7 @@ function billsSections() {
     ${line('−', 'Bills still to come', c.billsLeft)}
     ${c.otherLeft ? line('−', 'Other expenses to pay', c.otherLeft) : ''}
     ${line('−', 'Budget left to spend', c.budgetsLeft)}
-    <div class="line total-line ${c.excess < -0.004 ? 'neg' : ''}"><span>${excessLabel}</span><b>${money(c.excess)}</b></div>
+    <button class="line total-line ${c.excess < -0.004 ? 'neg' : ''}" data-act="xfer-open" aria-label="Move money between savings and checking"><span>${excessLabel}</span><b>${money(c.excess)} <i class="chev-sm">›</i></b></button>
     ${excessNote}
   </section>
 
@@ -1795,6 +1817,10 @@ async function saveImport() {
     }
     await B.setMonthField(ym, ['back'], list);
   }
+  // Savings transfers entered on Overview that the bank now shows: don't match them again.
+  const xfByYm = {};
+  for (const r of I.rows.filter(x => x.status !== 'dup' && x.xferId)) (xfByYm[D.ymOf(r.date)] = xfByYm[D.ymOf(r.date)] || []).push(r.xferId);
+  for (const ym in xfByYm) await B.setMonthField(ym, ['xferSeen'], [...new Set([...((S.months[ym] || {}).xferSeen || []), ...xfByYm[ym]])]);
   // Other expenses that went out: checked off as paid at the real amount.
   const otByMonth = {};
   for (const r of othersPaid) (otByMonth[D.ymOf(r.date)] = otByMonth[D.ymOf(r.date)] || []).push(r);
@@ -3172,6 +3198,33 @@ const acts = {
   'tour-end': async () => { await endTour(); location.hash = '#/home'; render(true); },
   'export-csv': () => exportCSV().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
   'export-json': () => exportJSON().catch(e => { console.error(e); toast('Couldn’t make the file'); }),
+  'xfer-open': () => openXfer(),
+  'xfer-dir': el => {
+    const X = S.xfer;
+    X.dir = el.dataset.v;
+    const ym = homeYm();
+    const ex = Calc.checklist(H(), S.months[ym], ym, S.purchases).excess;
+    X.amt = X.dir === 'in' ? (ex < -0.004 ? String(round2(-ex)) : '') : (ex > 0.004 ? String(round2(ex)) : '');
+    $('#sheet').innerHTML = xferHtml();
+  },
+  'xfer-go': async () => {
+    const amt = round2(Math.abs(num($('#xfer-amt').value) || 0));
+    if (!amt) { toast('Type an amount'); return; }
+    const dir = S.xfer.dir;
+    const ym = homeYm();
+    const sv = Number((H().savings || {}).actual) || 0;
+    const now = Date.now();
+    closeSheet();
+    if (dir === 'in') {
+      await setSavings(sv - amt, `Moved to checking — ${D.name(ym)}`, 'out');
+      await monthList('back', arr => [...arr, { id: newId(), name: 'From savings', amount: amt, received: true, receivedAt: now, xfer: true }]);
+      toast(`Moved ${money(amt)} from savings — transfer it in your bank too`);
+    } else {
+      await setSavings(sv + amt, `Moved from checking — ${D.name(ym)}`, 'in');
+      await monthList('other', arr => [...arr, { id: newId(), name: 'To savings', amount: amt, paid: true, paidAt: now, xfer: true }]);
+      toast(`Moved ${money(amt)} to savings — transfer it in your bank too`);
+    }
+  },
   'unexp-open': () => { S.sheet = 'unexp'; openSheet(unexpSheetHtml()); },
   'unexp-cover': async () => {
     const amt = round2(Math.abs(num($('#unexp-amt').value) || 0));
@@ -3298,6 +3351,14 @@ const acts = {
     inp.select();
   },
   'li-del': async el => {
+    const item = ((S.months[homeYm()] || {})[el.dataset.kind] || []).find(o => o.id === el.dataset.id);
+    if (item && item.xfer) {
+      if (!(await ask(`Undo this transfer? Savings goes back ${item.name === 'From savings' ? 'up' : 'down'} ${money(item.amount)}.`, 'Undo'))) return;
+      const sv = Number((H().savings || {}).actual) || 0;
+      await setSavings(sv + (el.dataset.kind === 'back' ? item.amount : -item.amount), 'Undid a transfer', 'undo');
+      await monthList(el.dataset.kind, arr => arr.filter(o => o.id !== el.dataset.id));
+      return;
+    }
     if (!(await ask('Remove this item?', 'Remove'))) return;
     await monthList(el.dataset.kind, arr => arr.filter(o => o.id !== el.dataset.id));
   },

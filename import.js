@@ -168,6 +168,7 @@ const Imp = (() => {
     const rules = H.rules || {};
     const recs = records(text);
     const seen = {};
+    const xferUsed = new Set();
     const rows = recs.map((rec, i) => {
       const mkey = keyOf(rec.desc);
       // Rules for transfers keep the account's last digits ("Transfer From Checking -1526"
@@ -226,6 +227,17 @@ const Imp = (() => {
       }
       if (atm) { row.venmo = true; row.reason = 'Cash withdrawal — pick a category or skip'; return row; }
       if (venmo) { row.reason = rec.credit ? 'Venmo in — your call' : 'Venmo — your call'; row.amount = rec.credit ? -rec.amount : rec.amount; return row; }
+      // A savings ↔ checking transfer already entered on Overview (tap Savings/Excess): skip it.
+      if (/transfer/i.test(rec.desc) || /^transfer$/i.test(rec.group)) {
+        const M0 = months[D.ymOf(rec.date)] || {};
+        const list = rec.credit ? M0.back || [] : M0.other || [];
+        const xf = list.find(x => x.xfer && !(M0.xferSeen || []).includes(x.id) && !xferUsed.has(x.id) && Math.abs((Number(x.amount) || 0) - rec.amount) < 0.01);
+        if (xf) {
+          xferUsed.add(xf.id);
+          Object.assign(row, { status: 'skip', cat: 'skip', xferId: xf.id, xferKind: rec.credit ? 'back' : 'other', reason: `Your transfer ${rec.credit ? 'from' : 'to'} savings — already counted` });
+          return row;
+        }
+      }
       // Bill payments (card or ACH) are skipped but remembered, so the bill shows as paid.
       const rule0 = findRule(rules, rkey);
       const ruleBill = rule0 && rule0.action === 'bill' && (H.bills || []).find(b => b.id === rule0.billId);

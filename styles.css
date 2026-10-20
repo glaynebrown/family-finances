@@ -662,3 +662,6 @@ svg.ci { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; strok
 .cover-row-un .btn { flex: none; white-space: nowrap; }
 .pend-add { display: grid; gap: 8px; margin-top: 8px; }
 .pend-add input[type="date"] { min-width: 0; }
+button.total-line { width: 100%; background: none; border: 0; border-top: 2px solid var(--ink); border-radius: 0; font-family: inherit; color: inherit; cursor: pointer; text-align: left; padding: 10px 0 0; }
+.total-line .chev-sm { font-style: normal; opacity: .45; font-weight: 400; margin-left: 2px; }
+button.total-line.neg { color: var(--neg); }
